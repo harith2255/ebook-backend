@@ -12,7 +12,12 @@ const router = express.Router();
 const upload = multer(); // ✅ handle file upload in memory
 
 // Upload & publish
-router.post("/upload", verifySupabaseAuth, adminOnly, upload.single("file"), uploadContent);
+router.post(
+  "/upload",
+  upload.single("file"),  // ⬅ REQUIRED
+  uploadContent
+);
+
 
 // List content
 router.get("/", verifySupabaseAuth, adminOnly, listContent);

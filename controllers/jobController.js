@@ -34,50 +34,7 @@ export const getFilteredJobs = async (req, res) => {
 };
 
 
-// ✅ Admin: Create Job
-export const createJob = async (req, res) => {
-  const body = req.body;
 
-  const { data, error } = await supabase
-    .from("jobs")
-    .insert([body])
-    .select();
-
-  if (error) return res.status(400).json({ error: error.message });
-
-  res.json({ message: "Job created", job: data[0] });
-};
-
-
-// ✅ Admin: Update Job
-export const updateJob = async (req, res) => {
-  const jobId = req.params.id;
-
-  const { data, error } = await supabase
-    .from("jobs")
-    .update(req.body)
-    .eq("id", jobId)
-    .select();
-
-  if (error) return res.status(400).json({ error: error.message });
-
-  res.json({ message: "Job updated", job: data[0] });
-};
-
-
-// ✅ Admin: Delete Job
-export const deleteJob = async (req, res) => {
-  const jobId = req.params.id;
-
-  const { error } = await supabase
-    .from("jobs")
-    .delete()
-    .eq("id", jobId);
-
-  if (error) return res.status(400).json({ error: error.message });
-
-  res.json({ message: "Job deleted successfully" });
-};
 
 
 // ✅ Save Job for User

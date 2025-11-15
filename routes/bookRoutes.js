@@ -18,9 +18,11 @@ const router = express.Router();
 
 
 // ✅ Public/User routes
+// specific routes first
+router.get("/search/name", searchBooksByName);
 router.get("/", getAllBooks);
 router.get("/:id", getBookById);
-router.get("/search/name", searchBooksByName);
+
 
 // ✅ User routes (require login)
 router.get("/user/purchased", verifySupabaseAuth, getPurchasedBooks);

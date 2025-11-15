@@ -1,39 +1,33 @@
 import express from "express";
+import {  verifySupabaseAuth } from "../middleware/authMiddleware.js";
 import {
-  getAllMockTests,
-  startMockTest,
+  getAvailableTests,
   getOngoingTests,
   getCompletedTests,
-  getUserStats,
+  getStats,
   getLeaderboard
 } from "../controllers/mocktestController.js";
 
-import { verifySupabaseAuth } from "../middleware/authMiddleware.js";
+import {
+  startTest,
+  saveAnswer,
+  finishTest
+} from "../controllers/testController.js";  // <-- YOUR START TEST IS HERE
 
 const router = express.Router();
 
-/* ------------------------------------------
-   📘 MOCK TEST LIST + USER PROGRESS ROUTES
--------------------------------------------*/
-
-// Get all available mock tests
-router.get("/", verifySupabaseAuth, getAllMockTests);
-
-// Get user's ongoing tests
+// ------------------ MOCK TESTS ------------------ //
+router.get("/", verifySupabaseAuth, getAvailableTests);
 router.get("/ongoing", verifySupabaseAuth, getOngoingTests);
-
-// Get user's completed tests
 router.get("/completed", verifySupabaseAuth, getCompletedTests);
-
-// Get user's stats
-router.get("/stats", verifySupabaseAuth, getUserStats);
-
-// Leaderboard
+router.get("/stats", verifySupabaseAuth, getStats);
 router.get("/leaderboard", verifySupabaseAuth, getLeaderboard);
 
-/* ------------------------------------------
-   🚀 START MOCK TEST
--------------------------------------------*/
-router.post("/start", verifySupabaseAuth, startMockTest);
+// ------------------ START TEST ------------------ //
+router.post("/start", verifySupabaseAuth, startTest);   // <-- ADD THIS
+
+// ------------------ TEST ACTIONS ------------------ //
+router.post("/save-answer", verifySupabaseAuth, saveAnswer);
+router.post("/finish", verifySupabaseAuth, finishTest);
 
 export default router;

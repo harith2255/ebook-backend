@@ -4,8 +4,6 @@ import {
   updateSystemSettings,
   getIntegrations,
   updateIntegration,
-  getRoles,
-  createRole,
   createBackup
 } from "../../controllers/admin/systemSettingsController.js";
 
@@ -19,8 +17,6 @@ router.put("/", verifySupabaseAuth, adminOnly, updateSystemSettings);
 router.get("/integrations", verifySupabaseAuth, adminOnly, getIntegrations);
 router.put("/integrations/:id", verifySupabaseAuth, adminOnly, updateIntegration);
 
-router.get("/roles", verifySupabaseAuth, adminOnly, getRoles);
-router.post("/roles", verifySupabaseAuth, adminOnly, createRole);
 
 router.post("/backup", verifySupabaseAuth, adminOnly, createBackup);
 

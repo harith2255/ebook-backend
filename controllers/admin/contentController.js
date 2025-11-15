@@ -1,10 +1,8 @@
 import supabase from "../../utils/supabaseClient.js";
-import fs from "fs";
-import path from "path";
 
-/* ===============================================
-   1. UPLOAD + PUBLISH CONTENT
-================================================ */
+/* ======================================================
+   1. UPLOAD CONTENT
+====================================================== */
 export const uploadContent = async (req, res) => {
   try {
     const { type, title, author, category, description, price } = req.body;
@@ -12,6 +10,7 @@ export const uploadContent = async (req, res) => {
 
     if (!file) return res.status(400).json({ error: "File required" });
 
+    // Map content type → bucket/table
     const bucket =
       type === "E-Book" ? "ebooks" :
       type === "Notes" ? "notes" :
@@ -21,7 +20,7 @@ export const uploadContent = async (req, res) => {
 
     const filePath = `${Date.now()}-${file.originalname}`;
 
-    // ✅ Upload file to Supabase storage
+    // Upload file
     const { error: uploadErr } = await supabase.storage
       .from(bucket)
       .upload(filePath, file.buffer, {
@@ -31,16 +30,13 @@ export const uploadContent = async (req, res) => {
 
     if (uploadErr) return res.status(400).json({ error: uploadErr.message });
 
-    // ✅ Get public file URL
+    // Get public URL
     const { data: publicUrl } = supabase.storage
       .from(bucket)
       .getPublicUrl(filePath);
 
-    // ✅ Insert into correct table
-    let table =
-      type === "E-Book" ? "ebooks" :
-      type === "Notes" ? "notes" :
-      "mock_tests";
+    // Insert DB row
+    const table = bucket;
 
     const { data, error } = await supabase
       .from(table)
@@ -51,7 +47,12 @@ export const uploadContent = async (req, res) => {
           category,
           description,
           price,
-          file_url: publicUrl.publicUrl
+          file_url: publicUrl.publicUrl,
+          pages: 0,
+          sales: 0,
+          tags: [],
+          status: "Published",
+          summary: ""
         }
       ])
       .select()
@@ -67,9 +68,9 @@ export const uploadContent = async (req, res) => {
   }
 };
 
-/* ===============================================
-   2. GET CONTENT (books, notes, tests)
-=============================================== */
+/* ======================================================
+   2. LIST CONTENT
+====================================================== */
 export const listContent = async (req, res) => {
   try {
     const { type, search } = req.query;
@@ -100,9 +101,9 @@ export const listContent = async (req, res) => {
   }
 };
 
-/* ===============================================
+/* ======================================================
    3. DELETE CONTENT
-=============================================== */
+====================================================== */
 export const deleteContent = async (req, res) => {
   try {
     const { id, type } = req.params;
@@ -124,28 +125,32 @@ export const deleteContent = async (req, res) => {
   }
 };
 
+/* ======================================================
+   4. EDIT CONTENT (with file replacement)
+====================================================== */
 export const editContent = async (req, res) => {
   try {
     const { id, type } = req.params;
     const updates = req.body;
     const file = req.file;
 
-    // ✅ Match exact types you used in uploadContent
-    const bucket =
-      type === "E-Book" ? "ebooks" :
-      type === "Notes" ? "notes" :
-      type === "Mock Test" ? "mock_tests" : null;
+    // Convert tags "tag1,tag2" → ["tag1", "tag2"]
+    if (updates.tags) {
+      updates.tags = updates.tags.split(",").map((t) => t.trim());
+    }
 
-    const table =
-      type === "E-Book" ? "ebooks" :
-      type === "Notes" ? "notes" :
-      type === "Mock Test" ? "mock_tests" : null;
+    const bucket =
+      type === "book" ? "ebooks" :
+      type === "note" ? "notes" :
+      type === "test" ? "mock_tests" : null;
+
+    const table = bucket;
 
     if (!bucket || !table) {
       return res.status(400).json({ error: `Invalid content type: ${type}` });
     }
 
-    // ✅ Fetch existing row
+    // Get existing file URL
     const { data: existing, error: fetchErr } = await supabase
       .from(table)
       .select("file_url")
@@ -158,16 +163,13 @@ export const editContent = async (req, res) => {
 
     let file_url = existing.file_url;
 
-    // ✅ If file uploaded, replace it
+    // Replace file
     if (file) {
       const oldFilename = existing.file_url.split("/").pop();
 
-      // ✅ Remove old file from storage
-      await supabase.storage
-        .from(bucket)
-        .remove([oldFilename]);
+      // Delete old file
+      await supabase.storage.from(bucket).remove([oldFilename]);
 
-      // ✅ Upload new file
       const newFilePath = `${Date.now()}-${file.originalname}`;
 
       const { error: uploadErr } = await supabase.storage
@@ -180,7 +182,6 @@ export const editContent = async (req, res) => {
         return res.status(400).json({ error: uploadErr.message });
       }
 
-      // ✅ Get new public URL
       const { data: publicUrl } = supabase.storage
         .from(bucket)
         .getPublicUrl(newFilePath);
@@ -188,7 +189,7 @@ export const editContent = async (req, res) => {
       file_url = publicUrl.publicUrl;
     }
 
-    // ✅ Update row in DB
+    // Update row
     const { data, error } = await supabase
       .from(table)
       .update({

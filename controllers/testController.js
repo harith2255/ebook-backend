@@ -1,116 +1,272 @@
-// controllers/testController.js
 import supabase from "../utils/supabaseClient.js";
-import { updateUserStats } from "./mocktestController.js";
 
-/* ----------------------------------------------------
-   📌 1. Get ALL QUESTIONS for a test
------------------------------------------------------*/
-export const getTestQuestions = async (req, res) => {
-  const { test_id } = req.params;
+/* ============================================
+   START TEST
+============================================ */
+export const startTest = async (req, res) => {
+  try {
+    const { test_id } = req.body;
+    const user_id = req.user.id;
 
-  const { data, error } = await supabase
-    .from("mock_test_questions")
-    .select("id, question, option_a, option_b, option_c, option_d, correct_option")
-    .eq("test_id", test_id);
+    if (!test_id) {
+      return res.status(400).json({ error: "Missing test_id" });
+    }
 
-  if (error) return res.status(400).json({ error: error.message });
-  res.json(data);
+    const { data: attempt, error } = await supabase
+      .from("mock_attempts")
+      .insert({
+        user_id,
+        test_id,
+        status: "in_progress",   // ✔ matches DB CHECK
+        started_at: new Date(),
+        completed_questions: 0,
+        score: 0,
+        time_spent: 0
+      })
+      .select()
+      .single();
+
+    if (error) return res.status(400).json({ error: error.message });
+
+    return res.json({ attempt });
+
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 };
 
-/* ----------------------------------------------------
-   📌 2. Get attempt details (test page load)
------------------------------------------------------*/
-export const getAttemptDetails = async (req, res) => {
-  const { attempt_id } = req.params;
+/* ============================================
+   GET QUESTIONS
+   (This is where your problem was)
+============================================ */
+export const getQuestions = async (req, res) => {
+  try {
+    const { test_id } = req.params;
 
-  const { data, error } = await supabase
-    .from("mock_attempts")
-    .select(`
-      id, test_id, user_id, status, started_at, completed_at,
-      mock_tests(id, title, duration_minutes, total_questions)
-    `)
-    .eq("id", attempt_id)
-    .maybeSingle();
+    const { data, error } = await supabase
+      .from("mock_test_questions")   // ✔ correct table
+      .select("*")
+      .eq("test_id", test_id)
+      .order("id");
 
-  if (error) return res.status(400).json({ error: error.message });
-  res.json(data);
+    if (error) return res.status(400).json({ error: error.message });
+
+    return res.json(data);
+
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 };
 
-/* ----------------------------------------------------
-   📌 3. Save answer (auto-save)
------------------------------------------------------*/
+/* ============================================
+   SAVE ANSWER
+============================================ */
 export const saveAnswer = async (req, res) => {
   const { attempt_id, question_id, answer } = req.body;
 
-  const { error } = await supabase
+  // 1️⃣ Save or update user's answer
+  await supabase
     .from("mock_answers")
-    .upsert(
-      [{ attempt_id, question_id, answer }],
-      { onConflict: "attempt_id,question_id" }
-    );
+    .upsert({
+      attempt_id,
+      question_id,
+      answer
+    });
 
-  if (error) return res.status(400).json({ error: error.message });
-
-  res.json({ message: "Answer saved" });
-};
-
-/* ----------------------------------------------------
-   📌 4. Finish Test (score + stats)
------------------------------------------------------*/
-export const finishTest = async (req, res) => {
-  const { attempt_id } = req.body;
-
-  // fetch attempt
-  const { data: attempt, error: aErr } = await supabase
-    .from("mock_attempts")
-    .select("user_id, started_at, test_id")
-    .eq("id", attempt_id)
-    .maybeSingle();
-
-  if (aErr || !attempt) return res.status(400).json({ error: "Attempt not found" });
-
-  const userId = attempt.user_id;
-
-  // fetch answers + correct values
-  const { data: answers, error: ansErr } = await supabase
+  // 2️⃣ Count completed answers
+  const { count } = await supabase
     .from("mock_answers")
-    .select(`
-      answer,
-      mock_test_questions(correct_option)
-    `)
+    .select("*", { count: "exact", head: true })
     .eq("attempt_id", attempt_id);
 
-  if (ansErr) return res.status(400).json({ error: ansErr.message });
-
-  // calculate score
-  let score = 0;
-  answers.forEach((a) => {
-    if (a.answer === a.mock_test_questions.correct_option) score++;
-  });
-
-  const completedAt = new Date();
-  const startedAt = new Date(attempt.started_at);
-  const timeSpent = Math.floor((completedAt - startedAt) / 60000);
-
-  // update attempt
-  const { error: updateErr } = await supabase
+  // 3️⃣ Update mock_attempts progress
+  await supabase
     .from("mock_attempts")
-    .update({
-      status: "completed",
-      completed_at: completedAt,
-      score,
-      time_spent: timeSpent,
-    })
+    .update({ completed_questions: count })
     .eq("id", attempt_id);
 
-  if (updateErr) return res.status(400).json({ error: updateErr.message });
-
-  // 🔥 UPDATE USER STATS AFTER FINISH
-  await updateUserStats(userId);
-
-  res.json({
-    message: "Test finished",
-    score,
-    timeSpent,
-  });
+  return res.json({ success: true });
 };
+
+
+/* ============================================
+   FINISH TEST
+============================================ */
+export const finishTest = async (req, res) => {
+  try {
+    const { attempt_id } = req.body;
+    const user_id = req.user.id;
+
+    const { data: attempt } = await supabase
+      .from("mock_attempts")
+      .select("test_id, started_at")
+      .eq("id", attempt_id)
+      .single();
+
+    const { score, percentScore } = await calculateScore(
+      attempt_id,
+      attempt.test_id
+    );
+
+    const started = new Date(attempt.started_at);
+    const now = new Date();
+    const timeSpent = Math.round((now - started) / 1000 / 60);
+
+    // 1️⃣ Update attempt
+    await supabase
+      .from("mock_attempts")
+      .update({
+        status: "completed",
+        score: percentScore,
+        completed_at: now,
+        time_spent: timeSpent
+      })
+      .eq("id", attempt_id);
+
+    // 2️⃣ Update participants count
+    await supabase.rpc("increment_participants", {
+      test_id_input: attempt.test_id
+    });
+
+    // 3️⃣ Update leaderboard & stats
+    await updateLeaderboard(user_id);
+    await updateUserStats(user_id, percentScore, timeSpent);
+
+    // 4️⃣ Update ranks
+    await updateRanks();
+
+    res.json({ success: true });
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+
+/* ============================================
+   CHECK ATTEMPT STATUS
+============================================ */
+export const getAttemptStatus = async (req, res) => {
+  try {
+    const { attempt_id } = req.params;
+
+    const { data, error } = await supabase
+      .from("mock_attempts")
+      .select("*")
+      .eq("id", attempt_id)
+      .single();
+
+    if (error) return res.status(400).json({ error: error.message });
+
+    return res.json(data);
+
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+// Calculate score for an attempt
+async function calculateScore(attempt_id, test_id) {
+  // Get all questions & correct answers
+  const { data: questions } = await supabase
+    .from("mock_test_questions")
+    .select("id, correct_option")
+    .eq("test_id", test_id);
+
+  // Get all saved answers
+  const { data: answers } = await supabase
+    .from("mock_answers")
+    .select("question_id, answer")
+    .eq("attempt_id", attempt_id);
+
+  let score = 0;
+
+  questions.forEach(q => {
+    const userAns = answers.find(a => a.question_id === q.id);
+    if (userAns && userAns.answer === q.correct_option) {
+      score++;
+    }
+  });
+
+  // percentage
+  const percentScore = (score / questions.length) * 100;
+
+  return { score, percentScore };
+}
+async function updateLeaderboard(user_id) {
+  const { data, error } = await supabase
+    .from("mock_attempts")
+    .select("score")
+    .eq("user_id", user_id)
+    .eq("status", "completed");
+
+  const scores = data.map(s => s.score);
+  const avg = scores.length ? scores.reduce((a,b) => a + b, 0) / scores.length : 0;
+
+  await supabase
+    .from("mock_leaderboard")
+    .upsert({
+      user_id,
+      average_score: avg,
+      tests_taken: scores.length
+    });
+}
+
+async function updateUserStats(user_id, newScore, timeSpent) {
+  const { data: stats } = await supabase
+    .from("user_stats")
+    .select("*")
+    .eq("user_id", user_id)
+    .single();
+
+  if (!stats) {
+    await supabase.from("user_stats").insert({
+      user_id,
+      tests_taken: 1,
+      average_score: newScore,
+      best_rank: null,
+      total_study_time: timeSpent
+    });
+    return;
+  }
+
+  const totalTests = stats.tests_taken + 1;
+  const avgScore =
+    (stats.average_score * stats.tests_taken + newScore) / totalTests;
+
+  await supabase
+    .from("user_stats")
+    .update({
+      tests_taken: totalTests,
+      average_score: avgScore,
+      total_study_time: stats.total_study_time + timeSpent
+    })
+    .eq("user_id", user_id);
+}
+async function updateRanks() {
+  // Fetch all leaderboard entries sorted by score DESC
+  const { data: leaderboard } = await supabase
+    .from("mock_leaderboard")
+    .select("user_id, average_score")
+    .order("average_score", { ascending: false });
+
+  if (!leaderboard || leaderboard.length === 0) return;
+
+  // Assign ranks
+  for (let i = 0; i < leaderboard.length; i++) {
+    const rank = i + 1;
+    const user_id = leaderboard[i].user_id;
+
+    // Update leaderboard best_rank
+    await supabase
+      .from("mock_leaderboard")
+      .update({ best_rank: rank })
+      .eq("user_id", user_id);
+
+    // Update all attempts for this user
+    await supabase
+      .from("mock_attempts")
+      .update({ rank })
+      .eq("user_id", user_id)
+      .eq("status", "completed");
+  }
+}

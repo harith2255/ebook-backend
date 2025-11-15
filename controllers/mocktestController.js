@@ -1,10 +1,6 @@
-// controllers/mocktestController.js
 import supabase from "../utils/supabaseClient.js";
 
-/* ----------------------------------------------------
-   📌 1. ALL AVAILABLE MOCK TESTS
------------------------------------------------------*/
-export const getAllMockTests = async (req, res) => {
+export const getAvailableTests = async (req, res) => {
   const { data, error } = await supabase
     .from("mock_tests")
     .select("*")
@@ -14,41 +10,6 @@ export const getAllMockTests = async (req, res) => {
   res.json(data);
 };
 
-/* ----------------------------------------------------
-   📌 2. START MOCK TEST (creates attempt)
------------------------------------------------------*/
-export const startMockTest = async (req, res) => {
-  const userId = req.user.id;
-  const { test_id } = req.body;
-
-  if (!test_id) return res.status(400).json({ error: "test_id required" });
-
-  // If already in progress
-  const { data: existing } = await supabase
-    .from("mock_attempts")
-    .select("*")
-    .eq("user_id", userId)
-    .eq("test_id", test_id)
-    .eq("status", "in_progress")
-    .maybeSingle();
-
-  if (existing) {
-    return res.json({ message: "Already in progress", attempt: existing });
-  }
-
-  // New attempt
-  const { data, error } = await supabase
-    .from("mock_attempts")
-    .insert([{ user_id: userId, test_id, status: "in_progress" }])
-    .select();
-
-  if (error) return res.status(400).json({ error: error.message });
-  res.json({ message: "Test started", attempt: data[0] });
-};
-
-/* ----------------------------------------------------
-   📌 3. ONGOING TESTS
------------------------------------------------------*/
 export const getOngoingTests = async (req, res) => {
   const userId = req.user.id;
 
@@ -57,30 +18,17 @@ export const getOngoingTests = async (req, res) => {
     .select(`
       id,
       test_id,
-      status,
-      score,
-      started_at,
-      mock_tests:mock_tests!mock_attempts_test_id_fkey (
-        id,
-        title,
-        subject,
-        total_questions,
-        duration_minutes,
-        difficulty
-      )
+      completed_questions,
+      mock_tests (*)
     `)
     .eq("user_id", userId)
-    .eq("status", "in_progress");
+    .eq("status", "ongoing");
 
   if (error) return res.status(400).json({ error: error.message });
 
   res.json(data);
 };
 
-
-/* ----------------------------------------------------
-   📌 4. COMPLETED TESTS
------------------------------------------------------*/
 export const getCompletedTests = async (req, res) => {
   const userId = req.user.id;
 
@@ -90,106 +38,92 @@ export const getCompletedTests = async (req, res) => {
       id,
       test_id,
       score,
+      rank,
       completed_at,
-      status,
-      mock_tests:mock_tests!mock_attempts_test_id_fkey (
-        id,
-        title,
-        subject,
-        total_questions,
-        duration_minutes,
-        difficulty
-      )
+      mock_tests(*)
     `)
     .eq("user_id", userId)
-    .in("status", ["completed", "time_expired"]);
+    .eq("status", "completed");
 
   if (error) return res.status(400).json({ error: error.message });
 
   res.json(data);
 };
 
-
-/* ----------------------------------------------------
-   📌 5. GET USER STATS (dashboard)
------------------------------------------------------*/
-export const getUserStats = async (req, res) => {
-  const userId = req.user.id;
-
-  const { data, error } = await supabase
-    .from("user_stats")
-    .select("*")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (error) return res.status(400).json({ error: error.message });
-
-  res.json(
-    data || {
-      tests_taken: 0,
-      average_score: 0,
-      best_rank: null,
-      total_study_time: 0,
-    }
-  );
-};
-
-/* ----------------------------------------------------
-   📌 6. UPDATE USER STATS (called after finishTest)
------------------------------------------------------*/
-export const updateUserStats = async (userId) => {
+export const getLeaderboard = async (req, res) => {
   try {
-    const { data: attempts } = await supabase
-      .from("mock_attempts")
-      .select("score, rank, time_spent")
-      .eq("user_id", userId)
-      .eq("status", "completed");
+    const { data, error } = await supabase
+      .from("mock_leaderboard")
+      .select("user_id, display_name, average_score, tests_taken")
+      .order("average_score", { ascending: false });
 
-    if (!attempts?.length) return;
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
 
-    const tests_taken = attempts.length;
+    return res.json(data);
 
-    const average_score = Math.round(
-      attempts.reduce((x, a) => x + (a.score || 0), 0) / tests_taken
-    );
-
-    const best_rank = Math.min(
-      ...attempts.map((a) => a.rank || Infinity)
-    );
-
-    const total_study_time = attempts.reduce(
-      (x, a) => x + (a.time_spent || 0),
-      0
-    );
-
-    await supabase.from("user_stats").upsert(
-      {
-        user_id: userId,
-        tests_taken,
-        average_score,
-        best_rank: best_rank === Infinity ? null : best_rank,
-        total_study_time,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "user_id" }
-    );
-
-  } catch (e) {
-    console.error("Failed to update stats:", e.message);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
   }
 };
 
-/* ----------------------------------------------------
-   📌 7. LEADERBOARD
------------------------------------------------------*/
-export const getLeaderboard = async (req, res) => {
+
+
+export const getStats = async (req, res) => {
+  const userId = req.user.id;
+
   const { data, error } = await supabase
-    .from("user_stats")
-    .select("user_id, average_score, tests_taken, best_rank")
-    .order("average_score", { ascending: false })
-    .limit(20);
+    .from("mock_attempts")
+    .select("score, rank, time_spent")
+    .eq("user_id", userId);
 
   if (error) return res.status(400).json({ error: error.message });
 
-  res.json(data);
+  const testsTaken = data.length;
+  const avgScore = data.length ? (data.reduce((a, b) => a + b.score, 0) / data.length) : 0;
+  const bestRank = data.length ? Math.min(...data.map(x => x.rank ?? 9999)) : null;
+  const totalStudyTime = data.reduce((a, b) => a + (b.time_spent || 0), 0);
+
+  res.json({
+    tests_taken: testsTaken,
+    average_score: Math.round(avgScore),
+    best_rank: bestRank,
+    total_study_time: totalStudyTime
+  });
 };
+export const startTest = async (req, res) => {
+  try {
+    const { test_id } = req.body;
+    const user_id = req.user.id; // from auth middleware
+
+    if (!test_id) {
+      return res.status(400).json({ error: "Missing test_id" });
+    }
+
+    // 1️⃣ Create new attempt
+    const { data: attempt, error: err1 } = await supabase
+      .from("mock_attempts")
+      .insert({
+        user_id,
+        test_id,
+        status: "ongoing",
+        started_at: new Date(),
+        completed_questions: 0,
+        score: 0
+      })
+      .select()
+      .single();
+
+    if (err1) return res.status(400).json({ error: err1.message });
+
+    // 2️⃣ Increase participants count
+    await supabase.rpc("increment_participants", { testid: test_id });
+
+    return res.json({ attempt });
+
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+

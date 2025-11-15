@@ -101,6 +101,7 @@ app.use("/api/mock-tests", mocktestRoutes);
 app.use("/api/notes",notesRoutes); 
 
 app.use("/api/writing", writingRoutes);
+app.use("/api/content", contentRoutes);
 
 app.use("/api/jobs", jobRoutes);
 app.use("/api/profile", profileRoutes);
@@ -113,6 +114,9 @@ app.use("/api/admin/content",contentRoutes);
 // report
 
 app.use("/api/admin/reports", reportsRoutes);
+
+import publicContentRoutes from "./routes/publicContentRoutes.js"
+app.use("/api/content", publicContentRoutes);
 
 
 // Admin Customer Management
@@ -133,14 +137,21 @@ import userNotificationRoutes from "./routes/notificationRoutes.js";
 
 app.use("/api/notifications", userNotificationRoutes);
 
+import seedRoutes from "./routes/admin/seedRoutes.js";
+
+app.use("/api/admin/seed", seedRoutes);
+
+
 // job
 import adminJobRoutes from "./routes/admin/jobRoutes.js"
 app.use("/api/admin/jobs",adminJobRoutes)
 import systemSettings from "./routes/admin/systemSettingsRoutes.js"
-app.use("/api/admin/system-settings",systemSettings)
+app.use("/api/admin/settings",systemSettings)
 import adminWritingServiceRoutes from "./routes/admin/adminWritingServiceRoutes.js"
 app.use("/api/admin/writing-service",adminWritingServiceRoutes)
 
+import paymentRoutes from "./routes/admin/paymentRoutes.js";
+app.use("/api/admin/payments", paymentRoutes);
 
 
 

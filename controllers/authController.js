@@ -43,47 +43,46 @@ export async function login(req, res) {
 
     if (error) return res.status(400).json({ error: error.message });
 
-    const access_token = data.session?.access_token; // ✅ Define this
+    const accessToken = data.session?.access_token;
+    if (!accessToken) return res.status(400).json({ error: "No access token" });
 
-    if (!access_token) {
-      return res.status(400).json({ error: "Login failed: no access token returned" });
-    }
-
-    // Fetch role from profiles
     let role = "user";
+
+    // Read role from profiles
     const { data: profile } = await supabase
       .from("profiles")
       .select("role")
       .eq("email", email)
       .single();
 
-    // ✅ Ensure admin role for super admin email
+    // Super admin
     if (email === process.env.SUPER_ADMIN_EMAIL) {
       role = "super_admin";
       await supabase.from("profiles").upsert([
-        {
-          id: data.user.id,
-          email,
-          role: "super_admin",
-        },
+        { id: data.user.id, email, role }
       ]);
     } else if (profile?.role) {
       role = profile.role;
     }
 
-    console.log(`✅ Login success: ${email} (${role})`);
-
+    // SEND THE ROLE DIRECTLY (no supabase metadata)
     return res.status(200).json({
       message: "Login successful",
-      user: { id: data.user.id, email, role },
-      access_token, // ✅ send the real token here
+      user: {
+        id: data.user.id,
+        email,
+        role,     // <--- this is the REAL role
+      },
+      access_token: accessToken,
     });
 
   } catch (err) {
-    console.error("Internal error:", err);
+    console.error(err);
     return res.status(500).json({ error: "Internal Server Error" });
   }
 }
+
+
 
 
 

@@ -1,10 +1,9 @@
-import bcrypt from "bcrypt";
 import supabase from "../utils/supabaseClient.js";
-import jwt from "jsonwebtoken";
-
 import sharp from "sharp";
 
-// ✅ Upload Avatar
+/* -------------------------------------------------------------------------- */
+/* 🖼️ UPLOAD AVATAR                                                            */
+/* -------------------------------------------------------------------------- */
 export const uploadAvatar = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -13,18 +12,13 @@ export const uploadAvatar = async (req, res) => {
       return res.status(400).json({ error: "No file uploaded" });
     }
 
-    const fileBuffer = req.file.buffer;
-    const fileExt = req.file.originalname.split(".").pop();
-    const fileName = `avatar-${userId}.${fileExt}`;
-    const filePath = `avatars/${fileName}`;
-
-    // ✅ Optimize image using sharp
-    const optimized = await sharp(fileBuffer)
+    const optimized = await sharp(req.file.buffer)
       .resize(300, 300)
       .png()
       .toBuffer();
 
-    // ✅ Upload to Supabase Storage
+    const filePath = `avatars/${userId}-${Date.now()}.png`;
+
     const { error: uploadError } = await supabase.storage
       .from("avatars")
       .upload(filePath, optimized, {
@@ -38,31 +32,35 @@ export const uploadAvatar = async (req, res) => {
       .from("avatars")
       .getPublicUrl(filePath);
 
-    // ✅ Save avatar URL in user_profiles
+    // Save avatar to profile table
     await supabase
       .from("user_profiles")
       .update({ avatar_url: urlData.publicUrl })
       .eq("user_id", userId);
 
     res.json({
-      message: "Avatar uploaded successfully",
+      message: "Avatar updated successfully",
       avatar_url: urlData.publicUrl,
     });
   } catch (err) {
-    console.error("[SERVER ERROR]", err);
-    res.status(500).json({ error: "Internal Server Error" });
-  }};
-// ✅ Get profile info
+    console.error("UPLOAD ERROR:", err);
+    res.status(500).json({ error: "Failed to upload avatar" });
+  }
+};
+
+/* -------------------------------------------------------------------------- */
+/* 📌 GET USER PROFILE (Complete: profile + notifications + security)          */
+/* -------------------------------------------------------------------------- */
 export const getUserProfile = async (req, res) => {
   const userId = req.user.id;
 
-  const { data: profile, error } = await supabase
+  const { data: profile, error: pErr } = await supabase
     .from("user_profiles")
     .select("*")
     .eq("user_id", userId)
     .maybeSingle();
 
-  if (error) return res.status(400).json({ error: error.message });
+  if (pErr) return res.status(400).json({ error: pErr.message });
 
   const { data: notifications } = await supabase
     .from("user_notifications")
@@ -72,107 +70,92 @@ export const getUserProfile = async (req, res) => {
 
   const { data: security } = await supabase
     .from("user_security")
-    .select("two_factor_enabled, two_factor_method")
+    .select("*")
     .eq("user_id", userId)
     .maybeSingle();
 
-  res.json({ profile, notifications, security });
+  res.json({
+    profile,
+    notifications: notifications || {},
+    security: security || {},
+  });
 };
 
-// ✅ Update personal info
+/* -------------------------------------------------------------------------- */
+/* ✏️ UPDATE PROFILE INFO                                                       */
+/* -------------------------------------------------------------------------- */
 export const updateUserProfile = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    const updates = {
-      ...req.body,
-      updated_at: new Date().toISOString(),
-    };
-
     const { data, error } = await supabase
-  .from("user_profiles")
-  .update({ ...req.body, updated_at: new Date().toISOString() })
-  .eq("user_id", req.user.id)
-  .select()
-  .maybeSingle();
+      .from("user_profiles")
+      .update({ ...req.body, updated_at: new Date().toISOString() })
+      .eq("user_id", userId)
+      .select()
+      .maybeSingle();
 
-    if (error) {
-      console.error("🔥 SUPABASE ERROR:", error);
-      return res.status(400).json({ error: error.message });
-    }
+    if (error) return res.status(400).json({ error: error.message });
 
-    res.json({
-      message: "Profile updated successfully",
-      profile: data,
-    });
+    res.json({ message: "Profile updated", profile: data });
   } catch (err) {
-    console.error("🔥 [SERVER ERROR]", err);
-    res.status(500).json({ error: "Internal Server Error" });
+    console.error("SERVER ERROR:", err);
+    res.status(500).json({ error: "Unable to update profile" });
   }
 };
 
-
-// ✅ Change password
+/* -------------------------------------------------------------------------- */
+/* 🔐 CHANGE PASSWORD (Secure, Supabase native)                               */
+/* -------------------------------------------------------------------------- */
 export const changePassword = async (req, res) => {
-  const { current_password, new_password } = req.body;
+  const { new_password } = req.body;
+
   const userId = req.user.id;
 
-  // Fetch current hash from Supabase Auth
-  const { data: { user }, error: authErr } = await supabase.auth.admin.getUserById(userId);
-  if (authErr) return res.status(400).json({ error: authErr.message });
-
-  // Verify old password (you can delegate this to Supabase if using password login)
-  // NOTE: Supabase handles password auth internally; this is just a placeholder.
-  const match = true; // assume Supabase verified it
-
-  if (!match) return res.status(403).json({ error: "Current password is incorrect" });
-
-  const { error } = await supabase.auth.admin.updateUserById(userId, {
-    password: new_password
+  const { error } = await supabase.auth.updateUser({
+    password: new_password,
   });
 
   if (error) return res.status(400).json({ error: error.message });
-
-  await supabase.from("user_security").upsert({
-    user_id: userId,
-    last_password_change: new Date().toISOString()
-  });
 
   res.json({ message: "Password updated successfully" });
 };
 
-// ✅ Preferences (theme, language, timezone)
+/* -------------------------------------------------------------------------- */
+/* 🎨 UPDATE PREFERENCES (Theme, Language, Timezone)                          */
+/* -------------------------------------------------------------------------- */
 export const updatePreferences = async (req, res) => {
   const userId = req.user.id;
-  const updates = req.body;
 
   const { error } = await supabase
-    .from("user_profiles")
-    .update(updates)
-    .eq("user_id", userId);
+    .from("user_preferences")
+    .upsert({ user_id: userId, ...req.body });
 
   if (error) return res.status(400).json({ error: error.message });
 
-  res.json({ message: "Preferences updated successfully" });
+  res.json({ message: "Preferences updated" });
 };
 
-// ✅ Notification Preferences
+/* -------------------------------------------------------------------------- */
+/* 🔔 NOTIFICATION SETTINGS                                                    */
+/* -------------------------------------------------------------------------- */
 export const updateNotifications = async (req, res) => {
   const userId = req.user.id;
-  const updates = req.body;
 
-  updates.updated_at = new Date().toISOString();
+  const updates = { ...req.body, updated_at: new Date().toISOString() };
 
   const { error } = await supabase
     .from("user_notifications")
-    .upsert({ user_id: userId, ...updates }, { onConflict: "user_id" });
+    .upsert({ user_id: userId, ...updates });
 
   if (error) return res.status(400).json({ error: error.message });
 
-  res.json({ message: "Notification preferences saved" });
+  res.json({ message: "Notifications updated" });
 };
 
-// ✅ Toggle Two-Factor Auth
+/* -------------------------------------------------------------------------- */
+/* 🛡️ TWO-FACTOR AUTH                                                         */
+/* -------------------------------------------------------------------------- */
 export const toggleTwoFactor = async (req, res) => {
   const userId = req.user.id;
   const { enabled, method } = req.body;
@@ -182,15 +165,19 @@ export const toggleTwoFactor = async (req, res) => {
     .upsert({
       user_id: userId,
       two_factor_enabled: enabled,
-      two_factor_method: method || "none"
-    }, { onConflict: "user_id" });
+      two_factor_method: method || "none",
+    });
 
   if (error) return res.status(400).json({ error: error.message });
 
-  res.json({ message: `Two-factor authentication ${enabled ? "enabled" : "disabled"}` });
+  res.json({
+    message: `Two-Factor Authentication ${enabled ? "enabled" : "disabled"}`,
+  });
 };
 
-// ✅ List sessions
+/* -------------------------------------------------------------------------- */
+/* 🖥️ SESSIONS LIST                                                            */
+/* -------------------------------------------------------------------------- */
 export const getSessions = async (req, res) => {
   const userId = req.user.id;
 
@@ -205,7 +192,9 @@ export const getSessions = async (req, res) => {
   res.json(data);
 };
 
-// ✅ Revoke session
+/* -------------------------------------------------------------------------- */
+/* ❌ REVOKE SESSION                                                           */
+/* -------------------------------------------------------------------------- */
 export const revokeSession = async (req, res) => {
   const userId = req.user.id;
   const { id } = req.params;
@@ -219,4 +208,4 @@ export const revokeSession = async (req, res) => {
   if (error) return res.status(400).json({ error: error.message });
 
   res.json({ message: "Session revoked" });
-}
+};

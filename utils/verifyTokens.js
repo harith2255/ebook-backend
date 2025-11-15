@@ -1,4 +1,4 @@
-import supabase  from "../utils/SupabaseClient.js";
+import supabase  from "../utils/supabaseClient";
 
 export async function verifyToken(req, res, next) {
   const token = req.headers.authorization?.split(" ")[1];
