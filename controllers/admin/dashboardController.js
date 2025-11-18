@@ -26,13 +26,24 @@ export const getAdminDashboard = async (req, res) => {
     /* -------------------------------------------------------
        1. TOTAL USERS (AUTH USERS)
     ------------------------------------------------------- */
-    const { data: authUsers, error: userErr } =
-      await supabase.auth.admin.listUsers();
+const { data: profileUsers, error: profileErr } = await supabase
+  .from("profiles")
+  .select("id, email, created_at")
+  .not("email", "is", null)
+  .not("email", "eq", "");
 
-    if (userErr) console.log("User Count Error:", userErr);
+if (profileErr) {
+  console.error("Profile Count Error:", profileErr);
+  return res.status(500).json({ error: "Unable to fetch users" });
+}
 
-    const allUsers = authUsers?.users || [];
-    const totalUsers = allUsers.length;
+const realUsers = profileUsers.filter(
+  (u) => u.email && u.email.trim() !== ""
+);
+
+const totalUsers = realUsers.length;
+
+
 
     /* -------------------------------------------------------
        2. ACTIVE SUBSCRIPTIONS
@@ -84,16 +95,18 @@ export const getAdminDashboard = async (req, res) => {
     /* -------------------------------------------------------
        6. USER SIGNUPS TREND (AUTH USERS)
     ------------------------------------------------------- */
-    const newUsers = allUsers.filter(
-      (u) => new Date(u.created_at) >= sixMonthsAgo
-    );
+   const newUsers = realUsers.filter(
+  (u) => u.created_at && new Date(u.created_at) >= sixMonthsAgo
+);
 
     const userGrowthTrend = {};
 
     newUsers.forEach((u) => {
-      const m = formatMonth(u.created_at);
-      userGrowthTrend[m] = (userGrowthTrend[m] || 0) + 1;
-    });
+  if (!u.created_at) return;
+  const m = formatMonth(u.created_at);
+  userGrowthTrend[m] = (userGrowthTrend[m] || 0) + 1;
+});
+
 
     /* -------------------------------------------------------
        7. SORT MONTHS FOR CHART

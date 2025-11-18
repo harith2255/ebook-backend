@@ -71,28 +71,54 @@ export const addNote = async (req, res) => {
 // ✅ Track downloads
 export const incrementDownloads = async (req, res) => {
   try {
+    const userId = req.user.id;
     const { id } = req.params;
 
-    const { data: note, error: fetchError } = await supabase
+    // 1️⃣ Fetch file URL
+    const { data: note, error: noteErr } = await supabase
       .from("notes")
-      .select("downloads")
+      .select("file_url")
       .eq("id", id)
       .single();
 
-    if (fetchError) throw fetchError;
+    if (noteErr) throw noteErr;
 
-    const { error: updateError } = await supabase
-      .from("notes")
-      .update({ downloads: note.downloads + 1 })
-      .eq("id", id);
+    // 2️⃣ Insert into downloaded notes table
+    await supabase
+      .from("downloaded_notes")
+      .insert({
+        user_id: userId,
+        note_id: Number(id)
+      });
 
-    if (updateError) throw updateError;
+    // 3️⃣ Return file URL to frontend
+    return res.json({
+      success: true,
+      file_url: note.file_url
+    });
 
-    res.json({ message: "Download recorded successfully" });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+};
+
+export const getDownloadedNotes = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const { data, error } = await supabase
+      .from("downloaded_notes")
+      .select("id, downloaded_at, note:notes(id, title, category, file_url)")
+      .eq("user_id", userId);
+
+    if (error) throw error;
+
+    res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
+
 
 // ✅ Get featured notes
 export const getFeaturedNotes = async (req, res) => {
@@ -105,6 +131,48 @@ export const getFeaturedNotes = async (req, res) => {
 
     if (error) throw error;
     res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// GET /api/notes/purchase/check?noteId=xxx
+export const checkNotePurchase = async (req, res) => {
+  try {
+    const userId = req.user.id;  // from JWT
+    const noteId = req.query.noteId;
+
+    const { data, error } = await supabase
+      .from("notes_purchase")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("note_id", noteId)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    res.json({ purchased: !!data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+// POST /api/notes/purchase
+export const purchaseNote = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { noteId } = req.body;
+
+    const { error } = await supabase
+      .from("notes_purchase")
+      .insert({
+        user_id: userId,
+        note_id: noteId,
+        purchased_at: new Date(),
+      });
+
+    if (error) throw error;
+
+    res.json({ success: true, message: "Note purchased successfully" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

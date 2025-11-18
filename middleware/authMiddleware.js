@@ -1,5 +1,4 @@
 import { supabasePublic } from "../utils/supabaseClient.js"; // ✅ Use the public client for auth verification
-import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 
 dotenv.config();

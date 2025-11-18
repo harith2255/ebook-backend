@@ -1,101 +1,155 @@
 import supabase from "../utils/supabaseClient.js";
 
-// 🧩 Register new use
+/* =====================================================
+   🧩 REGISTER NEW USER
+===================================================== */
 export async function register(req, res) {
   try {
-    const { email, password } = req.body;
+    const { first_name, last_name, email, password } = req.body;
 
-    // Validate input
-    if (!email || !password) {
-      return res.status(400).json({ error: "Email and password are required" });
+    if (!first_name || !last_name || !email || !password) {
+      return res.status(400).json({ error: "All fields are required" });
     }
 
-    const { data, error } = await supabase.auth.signUp({ email, password });
+    const full_name = `${first_name} ${last_name}`;
 
-    console.log("🔍 Supabase signup response:", data, error);
+    /* --------------------------------------------------
+       1️⃣ Create user in Supabase Auth
+    -------------------------------------------------- */
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { first_name, last_name, full_name }
+      }
+    });
 
-    if (error) {
-      return res.status(400).json({ error: error.message || error });
+    if (authError) {
+      return res.status(400).json({ error: authError.message });
+    }
+
+    const userId = authData.user.id;
+
+    /* --------------------------------------------------
+       2️⃣ Insert into PROFILES table
+    -------------------------------------------------- */
+    const { error: insertError } = await supabase.from("profiles").insert({
+      id: userId,
+      email,
+      first_name,
+      last_name,
+      full_name,
+      role: "User",
+      status: "active",
+      plan: "free",
+      created_at: new Date().toISOString(),
+    });
+
+    if (insertError) {
+      console.error("Profile insert error:", insertError);
+      return res.status(500).json({ error: "Failed to save user profile" });
     }
 
     return res.status(201).json({
-      message: "User registered successfully",
-      user: data.user,
+      message: "Account created successfully",
+      user: {
+        id: userId,
+        first_name,
+        last_name,
+        full_name,
+        email,
+        role: "User",
+      },
     });
+
   } catch (err) {
-    console.error("❌ Unexpected error:", err);
+    console.error("Unexpected register error:", err);
     return res.status(500).json({ error: "Internal Server Error" });
   }
 }
 
-
-
-
-// 🧠 Login existing user
+/* =====================================================
+   🧠 LOGIN USER
+===================================================== */
 export async function login(req, res) {
   try {
     const { email, password } = req.body;
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password required" });
+    }
 
-    if (error) return res.status(400).json({ error: error.message });
+    /* --------------------------------------------------
+       1️⃣ Authenticate with Supabase
+    -------------------------------------------------- */
+    const { data: loginData, error: loginError } =
+      await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-    const accessToken = data.session?.access_token;
-    if (!accessToken) return res.status(400).json({ error: "No access token" });
+    if (loginError) {
+      return res.status(400).json({ error: loginError.message });
+    }
 
-    let role = "user";
+    const accessToken = loginData.session?.access_token;
+    const userId = loginData.user.id;
 
-    // Read role from profiles
-    const { data: profile } = await supabase
+    /* --------------------------------------------------
+       2️⃣ Fetch role from PROFILES table
+    -------------------------------------------------- */
+    let role = "User";
+
+    const { data: profile, error: profileErr } = await supabase
       .from("profiles")
       .select("role")
-      .eq("email", email)
+      .eq("id", userId)
       .single();
 
-    // Super admin
+    if (profileErr) {
+      console.error("Profile lookup error:", profileErr);
+    }
+
+    if (profile?.role) role = profile.role;
+
+    /* --------------------------------------------------
+       3️⃣ Super Admin Override
+    -------------------------------------------------- */
     if (email === process.env.SUPER_ADMIN_EMAIL) {
       role = "super_admin";
       await supabase.from("profiles").upsert([
-        { id: data.user.id, email, role }
+        { id: userId, email, role }
       ]);
-    } else if (profile?.role) {
-      role = profile.role;
     }
 
-    // SEND THE ROLE DIRECTLY (no supabase metadata)
     return res.status(200).json({
       message: "Login successful",
       user: {
-        id: data.user.id,
+        id: userId,
         email,
-        role,     // <--- this is the REAL role
+        role,
       },
       access_token: accessToken,
     });
 
   } catch (err) {
-    console.error(err);
+    console.error("Login error:", err);
     return res.status(500).json({ error: "Internal Server Error" });
   }
 }
 
-
-
-
-
-
-// 🚪 Logout
+/* =====================================================
+   🚪 LOGOUT USER
+===================================================== */
 export async function logout(req, res) {
   try {
     const { error } = await supabase.auth.signOut();
     if (error) return res.status(400).json({ error: error.message });
 
     return res.status(200).json({ message: "Logged out successfully" });
+
   } catch (err) {
-    console.error("Internal error:", err);
+    console.error("Logout error:", err);
     return res.status(500).json({ error: "Internal Server Error" });
   }
 }

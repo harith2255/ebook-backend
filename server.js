@@ -5,28 +5,10 @@ import bodyParser from "body-parser";
 import cron from "node-cron";
 import supabase from "./utils/supabaseClient.js";
 
-// 🧩 Import Routes
-import authRoutes from "./routes/authRoutes.js";
-import bookRoutes from "./routes/bookRoutes.js";
-import dashboardRoutes from "./routes/dashboardRoutes.js";
-import libraryRoutes from "./routes/libraryRoutes.js";
-import mocktestRoutes from "./routes/mocktestRoutes.js";
-import notesRoutes from "./routes/notesRoutes.js";
-import writingRoutes from "./routes/writingRoutes.js";
-import jobRoutes from "./routes/jobRoutes.js";
-import profileRoutes from "./routes/profileRoutes.js";
-import admindashboardRoutes from "./routes/admin/admindashboardRoutes.js"
-import customerRoutes from "./routes/admin/customerRoutes.js";
-import contentRoutes from "./routes/admin/contentRoutes.js"
-import drmRoutes from "./routes/admin/drmRoutes.js";
-import reportsRoutes from "./routes/admin/reportRoutes.js";
-import aiRoutes from "./routes/admin/aiRoutes.js";
-import notificationRoutes from "./routes/admin/notificationRoutes.js";
 dotenv.config();
-
 const app = express();
 
-// 🔧 Middleware
+// ---------- Middleware ----------
 app.use(bodyParser.json());
 app.use(
   cors({
@@ -37,43 +19,47 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// cors
+app.use(
+  cors({
+    origin: [
+      "http://localhost:3000",
+      "http://localhost:3001",
+      "http://127.0.0.1:3000",
+      "http://127.0.0.1:3001"
+    ],
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"]
+  })
+);
 
-// 🕒 CRON JOB — Auto-expire mock tests every 5 minutes
+// ---------- CRON JOB ----------
 cron.schedule("*/5 * * * *", async () => {
   console.log("⏰ [CRON] Checking for expired mock tests...");
 
   try {
-    // 1️⃣ Fetch in-progress attempts with linked test durations
     const { data: attempts, error } = await supabase
       .from("mock_attempts")
       .select("id, started_at, test_id, mock_tests(duration_minutes)")
       .eq("status", "in_progress");
 
     if (error) throw error;
-    if (!attempts?.length) {
-      console.log("✅ [CRON] No active mock tests found.");
-      return;
-    }
+    if (!attempts?.length) return;
 
     const now = new Date();
     const expiredIds = [];
 
-    // 2️⃣ Check for expiry safely
     for (const attempt of attempts) {
       const started = new Date(attempt.started_at);
       const duration = attempt.mock_tests?.duration_minutes || 0;
-      if (!duration) {
-        console.warn(`⚠️ [CRON] Attempt ${attempt.id} has missing duration (test_id=${attempt.test_id}).`);
-        continue;
-      }
-
       const expiresAt = new Date(started.getTime() + duration * 60000);
+
       if (now > expiresAt) expiredIds.push(attempt.id);
     }
 
-    // 3️⃣ Auto-close expired attempts
     if (expiredIds.length > 0) {
-      const { error: updateError } = await supabase
+      await supabase
         .from("mock_attempts")
         .update({
           status: "time_expired",
@@ -81,91 +67,97 @@ cron.schedule("*/5 * * * *", async () => {
         })
         .in("id", expiredIds);
 
-      if (updateError) throw updateError;
-
-      console.log(`🕒 [CRON] Auto-closed ${expiredIds.length} expired mock test(s).`);
-    } else {
-      console.log("✅ [CRON] No expired mock tests yet.");
+      console.log(`🕒 Auto-closed ${expiredIds.length} expired test(s).`);
     }
   } catch (err) {
     console.error("❌ [CRON ERROR]", err.message);
   }
 });
 
-// ✅ ROUTES — organized by feature
+// ---------- Routes ----------
+import authRoutes from "./routes/authRoutes.js";
+import bookRoutes from "./routes/bookRoutes.js";          // ⭐ PUBLIC BOOKS
+import dashboardRoutes from "./routes/dashboardRoutes.js";
+import libraryRoutes from "./routes/libraryRoutes.js";
+import mocktestRoutes from "./routes/mocktestRoutes.js";
+import notesRoutes from "./routes/notesRoutes.js";
+import writingRoutes from "./routes/writingRoutes.js";
+import jobRoutes from "./routes/jobRoutes.js";
+import profileRoutes from "./routes/profileRoutes.js";
+import purchaseRoutes from "./routes/purchaseRoutes.js";  // ⭐ PURCHASE
+import testRoutes from "./routes/testRoutes.js";
+
+// ---------- Admin Routes ----------
+import admindashboardRoutes from "./routes/admin/admindashboardRoutes.js";
+import customerRoutes from "./routes/admin/customerRoutes.js";
+import contentRoutes from "./routes/admin/contentRoutes.js";   // ⭐ UPLOAD CONTENT
+import drmRoutes from "./routes/admin/drmRoutes.js";
+import reportsRoutes from "./routes/admin/reportRoutes.js";
+import aiRoutes from "./routes/admin/aiRoutes.js";
+import notificationRoutes from "./routes/admin/notificationRoutes.js";
+import seedRoutes from "./routes/admin/seedRoutes.js";
+import adminJobRoutes from "./routes/admin/jobRoutes.js";
+import systemSettings from "./routes/admin/systemSettingsRoutes.js";
+import adminWritingServiceRoutes from "./routes/admin/adminWritingServiceRoutes.js";
+
+// ---------- PUBLIC CONTENT (user side) ----------
+import publicContentRoutes from "./routes/publicContentRoutes.js";
+
+// ---------------- Route Registrations ----------------
 app.use("/api/auth", authRoutes);
+
+// ⭐ PUBLIC BOOKS (used in Explore page)
 app.use("/api/books", bookRoutes);
+
+// ⭐ USER PURCHASE
+app.use("/api/purchase", purchaseRoutes);
+
+// Regular user routes
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/library", libraryRoutes);
 app.use("/api/mock-tests", mocktestRoutes);
-app.use("/api/notes",notesRoutes); 
-
+app.use("/api/notes", notesRoutes);
 app.use("/api/writing", writingRoutes);
-app.use("/api/content", contentRoutes);
-
 app.use("/api/jobs", jobRoutes);
 app.use("/api/profile", profileRoutes);
-import testRoutes from "./routes/testRoutes.js";
-
 app.use("/api/test", testRoutes);
 
-app.use("/api/admin",admindashboardRoutes);
-app.use("/api/admin/content",contentRoutes);
-// report
-
+// ⭐ ADMIN ROUTES
+app.use("/api/admin", admindashboardRoutes);
+app.use("/api/admin/customers", customerRoutes);
+app.use("/api/admin/content", contentRoutes);   // upload list delete edit
+app.use("/api/admin/drm", drmRoutes);
 app.use("/api/admin/reports", reportsRoutes);
+app.use("/api/admin/ai", aiRoutes);
+app.use("/api/admin/notifications", notificationRoutes);
+app.use("/api/admin/seed", seedRoutes);
+app.use("/api/admin/jobs", adminJobRoutes);
+app.use("/api/admin/settings", systemSettings);
+app.use("/api/admin/writing-service", adminWritingServiceRoutes);
 
-import publicContentRoutes from "./routes/publicContentRoutes.js"
+// ⭐ PUBLIC CONTENT FOR USERS (notes, mocktests)
 app.use("/api/content", publicContentRoutes);
 
 
-// Admin Customer Management
-app.use("/api/admin/customers", customerRoutes);
-// drm
-app.use("/api/admin/drm", drmRoutes);
-// report
-app.use("/api/admin/reports",reportsRoutes)
-// ai
+import subscriptionsRoutes from "./routes/subscriptionRoutes.js";
+import paymentsRoutes from "./routes/paymentRoutes.js";
+
+app.use("/api/subscriptions", subscriptionsRoutes);
+app.use("/api/payments", paymentsRoutes);
 
 
-app.use("/api/admin/ai", aiRoutes);
-
-
-app.use("/api/admin/notifications", notificationRoutes);
-
-import userNotificationRoutes from "./routes/notificationRoutes.js";
-
-app.use("/api/notifications", userNotificationRoutes);
-
-import seedRoutes from "./routes/admin/seedRoutes.js";
-
-app.use("/api/admin/seed", seedRoutes);
-
-
-// job
-import adminJobRoutes from "./routes/admin/jobRoutes.js"
-app.use("/api/admin/jobs",adminJobRoutes)
-import systemSettings from "./routes/admin/systemSettingsRoutes.js"
-app.use("/api/admin/settings",systemSettings)
-import adminWritingServiceRoutes from "./routes/admin/adminWritingServiceRoutes.js"
-app.use("/api/admin/writing-service",adminWritingServiceRoutes)
-
-import paymentRoutes from "./routes/admin/paymentRoutes.js";
-app.use("/api/admin/payments", paymentRoutes);
-
-
-
-// ✅ Base route
+// Base Route
 app.get("/", (req, res) => {
-  res.send("✅ Supabase + Express backend is running successfully 🚀");
+  res.send("✅ Backend running successfully 🚀");
 });
 
-// ✅ Global Error Handling (optional safety net)
+
+// Error Handler
 app.use((err, req, res, next) => {
-  console.error("🔥 [SERVER ERROR]", err.stack);
+  console.error("🔥 SERVER ERROR", err.stack);
   res.status(500).json({ error: "Internal Server Error" });
 });
 
-// ✅ Start the server
+// Start Server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
