@@ -8,14 +8,28 @@ export async function getDashboardData(req, res) {
   try {
     const userId = req.user.id;
 
-    // 1️⃣ Books read count
+    /* --------------------
+       1️⃣ Books Completed
+    -------------------- */
     const { count: booksRead } = await supabase
       .from("user_books")
       .select("*", { count: "exact", head: true })
       .eq("user_id", userId)
       .eq("status", "completed");
 
-    // 2️⃣ Tests completed
+    // Books completed last 30 days
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
+
+    const { count: booksCompletedMonth } = await supabase
+      .from("user_books")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq("status", "completed")
+      .gte("updated_at", thirtyDaysAgo);
+
+    /* -------------------
+       2️⃣ Tests completed
+    --------------------- */
     const { data: testResults, count: testsCompleted } = await supabase
       .from("test_results")
       .select("*", { count: "exact" })
@@ -29,16 +43,28 @@ export async function getDashboardData(req, res) {
           ).toFixed(1)
         : 0;
 
-    // 3️⃣ Study hours (mock example: from test_results duration or user_activity)
+    /* -------------------
+       3️⃣ Study Hours
+    --------------------- */
     const { data: studyData } = await supabase
       .from("study_sessions")
-      .select("duration")
+      .select("duration, created_at")
       .eq("user_id", userId);
 
     const totalStudyHours =
       studyData?.reduce((sum, s) => sum + (s.duration || 0), 0) || 0;
 
-    // 4️⃣ Active streak (mock: check consecutive login days)
+    // last 7 days
+    const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+
+    const weeklyHours =
+      studyData
+        ?.filter((s) => s.created_at >= weekAgo)
+        ?.reduce((sum, s) => sum + (s.duration || 0), 0) || 0;
+
+    /* -------------------
+       4️⃣ Active Streak
+    --------------------- */
     const { data: streakData } = await supabase
       .from("user_streaks")
       .select("streak_days")
@@ -47,42 +73,25 @@ export async function getDashboardData(req, res) {
 
     const activeStreak = streakData?.streak_days || 0;
 
-    // 5️⃣ Continue Reading books (recent reading activity)
-    const { data: recentBooks } = await supabase
-      .from("user_books")
-      .select("book_id, progress, books(title, author, cover_url)")
-      .eq("user_id", userId)
-      .order("updated_at", { ascending: false })
-      .limit(3);
+    /* -------------------
+       5️⃣ Continue Reading
+    --------------------- */
+   const { data: recentBooks } = await supabase
+  .from("user_library")
+  .select(`
+      book_id,
+      progress,
+      added_at,
+      books (
+        title,
+        author,
+        cover_url
+      )
+  `)
+  .eq("user_id", userId)
+  .order("added_at", { ascending: false })
+  .limit(3);
 
-    // 6️⃣ Upcoming Tests (future scheduled)
-    const { data: upcomingTests } = await supabase
-      .from("mock_tests")
-      .select("id, title, scheduled_date, total_questions")
-      .gt("scheduled_date", new Date().toISOString())
-      .order("scheduled_date", { ascending: true })
-      .limit(3);
-
-    // 7️⃣ Recent Activities (mix of reading, test, and purchase)
-    const { data: activities } = await supabase
-      .from("user_activity")
-      .select("action, details, created_at, type")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(5);
-
-    res.json({
-      stats: {
-        booksRead: booksRead || 0,
-        testsCompleted: testsCompleted || 0,
-        avgScore,
-        studyHours: totalStudyHours,
-        activeStreak,
-      },
-      recentBooks: recentBooks || [],
-      upcomingTests: upcomingTests || [],
-      recentActivity: activities || [],
-    });
   } catch (err) {
     console.error("Dashboard fetch error:", err.message);
     res.status(500).json({ error: "Failed to fetch dashboard data" });

@@ -3,31 +3,9 @@ import supabase from "../../utils/supabaseClient.js";
 
 const router = express.Router();
 
-/* -----------------------------------------
-   CONSTANT DATA
------------------------------------------ */
-const indianNames = [
-  "Aarav", "Vivaan", "Aditya", "Kabir", "Arjun",
-  "Diya", "Anaya", "Isha", "Riya", "Saanvi"
-];
-
-const sampleBooks = [
-  "Advanced Physics", "Organic Chemistry Guide",
-  "Modern Agriculture Handbook", "Data Structures in C++",
-  "Soil Science Basics", "Irrigation Engineering",
-  "Machine Learning Essentials", "Plant Biology Notes"
-];
-
-const categories = [
-  "Science", "Engineering", "Agriculture",
-  "Computer Science", "Mathematics"
-];
-
-const activityTypes = ["subscription", "content", "login", "purchase"];
-
-/* -----------------------------------------
-   HELPERS
------------------------------------------ */
+/* ------------------------------
+   Helper Functions
+------------------------------ */
 const rand = (min, max) =>
   Math.floor(Math.random() * (max - min + 1)) + min;
 
@@ -41,25 +19,20 @@ function randomDate() {
   ).toISOString();
 }
 
-function getAction(type) {
-  switch (type) {
-    case "subscription":
-      return "activated a subscription";
-    case "content":
-      return `uploaded a book "${sampleBooks[rand(0, sampleBooks.length - 1)]}"`;
-    case "login":
-      return "logged in";
-    case "purchase":
-      return `purchased "${sampleBooks[rand(0, sampleBooks.length - 1)]}"`;
-    default:
-      return "performed an action";
-  }
-}
+const sampleBooks = [
+  "Advanced Physics", "Machine Learning Essentials",
+  "Organic Chemistry Guide", "Data Structures in C++",
+  "Irrigation Engineering", "Plant Biology Notes"
+];
 
-/* -----------------------------------------
-   ROUTE: Seed Dashboard
------------------------------------------ */
+const categories = [
+  "Science", "Engineering", "Agriculture",
+  "Computer Science", "Mathematics"
+];
 
+/* ------------------------------
+   SEED DASHBOARD
+------------------------------ */
 router.post("/seed-dashboard", async (req, res) => {
   try {
     const names = [
@@ -68,14 +41,11 @@ router.post("/seed-dashboard", async (req, res) => {
       "Sara Kapoor", "Meera Das", "Karan Jain", "Sneha Bose"
     ];
 
-    const plans = ["Monthly", "Annual", "Student"];
-
     const createdUsers = [];
 
-    // 1️⃣ Wipe old subscription data only
-    await supabase.from("subscriptions").delete().neq("id", "");
-
-    // 2️⃣ Create 10 users & profiles
+    /* ------------------------------------
+       1️⃣ Create 10 test users
+    ------------------------------------ */
     for (let i = 0; i < 10; i++) {
       const email = `seed_${Date.now()}_${i}@test.com`;
 
@@ -93,64 +63,106 @@ router.post("/seed-dashboard", async (req, res) => {
         {
           id: userId,
           full_name: names[i],
-          avatar_url: null
         }
       ]);
 
-      createdUsers.push({ userId, name: names[i] });
+      createdUsers.push(userId);
+    }
 
-      // Insert subscription
-      await supabase.from("subscriptions").insert([
+    /* ------------------------------------
+       2️⃣ Seed Books + User Book Progress
+    ------------------------------------ */
+    for (const userId of createdUsers) {
+      for (let i = 0; i < 5; i++) {
+        await supabase.from("user_books").insert([
+          {
+            user_id: userId,
+            book_id: rand(1, 5), // match your books table IDs
+            status: i % 2 === 0 ? "completed" : "reading",
+            progress: rand(10, 90),
+            updated_at: randomDate()
+          }
+        ]);
+      }
+    }
+
+    /* ------------------------------------
+       3️⃣ Seed Test Results
+    ------------------------------------ */
+    for (const userId of createdUsers) {
+      for (let i = 0; i < 3; i++) {
+        await supabase.from("test_results").insert([
+          {
+            user_id: userId,
+            score: rand(40, 100),
+            completed_at: randomDate()
+          }
+        ]);
+      }
+    }
+
+    /* ------------------------------------
+       4️⃣ Seed Study Sessions
+    ------------------------------------ */
+    for (const userId of createdUsers) {
+      for (let i = 0; i < 4; i++) {
+        await supabase.from("study_sessions").insert([
+          {
+            user_id: userId,
+            duration: rand(1, 5), // hours
+            date: randomDate()
+          }
+        ]);
+      }
+    }
+
+    /* ------------------------------------
+       5️⃣ Seed Active Streaks
+    ------------------------------------ */
+    for (const userId of createdUsers) {
+      await supabase.from("user_streaks").upsert([
         {
           user_id: userId,
-          plan: plans[rand(0, plans.length - 1)],
-          amount: rand(100, 900),
-          status: "active",
-          start_date: new Date(),
-          end_date: new Date(Date.now() + 30 * 86400000)
+          streak_days: rand(1, 15)
         }
       ]);
     }
 
-    // 3️⃣ Book sales
-    await supabase.from("book_sales").insert(
-      Array.from({ length: 15 }).map(() => ({
-        price: rand(100, 999),
-        book_name: sampleBooks[rand(0, sampleBooks.length - 1)],
-        category: categories[rand(0, categories.length - 1)],
-        created_at: randomDate()
-      }))
-    );
+    /* ------------------------------------
+       6️⃣ Seed Upcoming Mock Tests
+    ------------------------------------ */
+    for (let i = 0; i < 5; i++) {
+      await supabase.from("mock_tests").insert([
+        {
+          title: sampleBooks[rand(0, sampleBooks.length - 1)] + " Test",
+          scheduled_date: new Date(Date.now() + rand(1, 10) * 86400000),
+          total_questions: rand(20, 50)
+        }
+      ]);
+    }
 
-    // 4️⃣ Revenue table
-    await supabase.from("revenue").insert(
-      Array.from({ length: 20 }).map(() => ({
-        amount: rand(200, 4000),
-        created_at: randomDate()
-      }))
-    );
-
-    // 5️⃣ Activity
-    await supabase.from("activity_log").insert(
-      createdUsers.map(({ userId }) => {
-        const type = activityTypes[rand(0, activityTypes.length - 1)];
-        return {
+    /* ------------------------------------
+       7️⃣ Seed User Activity Logs
+    ------------------------------------ */
+    for (const userId of createdUsers) {
+      await supabase.from("user_activity").insert([
+        {
           user_id: userId,
-          user_name: indianNames[rand(0, indianNames.length - 1)],
-          type,
-          action: getAction(type),
+          action: "purchased book",
+          details: sampleBooks[rand(0, sampleBooks.length - 1)],
+          type: "purchase",
           created_at: randomDate()
-        };
-      })
-    );
+        }
+      ]);
+    }
 
     res.json({
-      message: "Sample dashboard data inserted successfully!",
+      message: "Dashboard seed inserted successfully!",
       users_created: createdUsers.length
     });
 
   } catch (err) {
-    console.error("Seed Error:", err);
+    console.error("Seed error:", err);
     res.status(500).json({ error: err.message });
   }
 });

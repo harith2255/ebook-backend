@@ -1,9 +1,9 @@
 import supabase from "../utils/supabaseClient.js";
 import sharp from "sharp";
 
-/* -------------------------------------------------------------------------- */
-/* 🖼️ UPLOAD AVATAR                                                            */
-/* -------------------------------------------------------------------------- */
+/* ----------------------------------------------------------------------------
+   1. UPLOAD AVATAR  (writes to profiles.avatar_url)
+---------------------------------------------------------------------------- */
 export const uploadAvatar = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -12,6 +12,7 @@ export const uploadAvatar = async (req, res) => {
       return res.status(400).json({ error: "No file uploaded" });
     }
 
+    // optimize image
     const optimized = await sharp(req.file.buffer)
       .resize(300, 300)
       .png()
@@ -32,11 +33,11 @@ export const uploadAvatar = async (req, res) => {
       .from("avatars")
       .getPublicUrl(filePath);
 
-    // Save avatar to profile table
+    // update profile
     await supabase
-      .from("user_profiles")
+      .from("profiles")
       .update({ avatar_url: urlData.publicUrl })
-      .eq("user_id", userId);
+      .eq("id", userId);
 
     res.json({
       message: "Avatar updated successfully",
@@ -48,50 +49,43 @@ export const uploadAvatar = async (req, res) => {
   }
 };
 
-/* -------------------------------------------------------------------------- */
-/* 📌 GET USER PROFILE (Complete: profile + notifications + security)          */
-/* -------------------------------------------------------------------------- */
+/* ----------------------------------------------------------------------------
+   2. GET USER PROFILE  (profiles + notifications)
+---------------------------------------------------------------------------- */
 export const getUserProfile = async (req, res) => {
   const userId = req.user.id;
 
   const { data: profile, error: pErr } = await supabase
-    .from("user_profiles")
+    .from("profiles")
     .select("*")
-    .eq("user_id", userId)
+    .eq("id", userId)
     .maybeSingle();
 
   if (pErr) return res.status(400).json({ error: pErr.message });
 
+  // user notifications
   const { data: notifications } = await supabase
     .from("user_notifications")
     .select("*")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  const { data: security } = await supabase
-    .from("user_security")
-    .select("*")
-    .eq("user_id", userId)
-    .maybeSingle();
+    .eq("user_id", userId);
 
   res.json({
     profile,
-    notifications: notifications || {},
-    security: security || {},
+    notifications
   });
 };
 
-/* -------------------------------------------------------------------------- */
-/* ✏️ UPDATE PROFILE INFO                                                       */
-/* -------------------------------------------------------------------------- */
+/* ----------------------------------------------------------------------------
+   3. UPDATE PROFILE
+---------------------------------------------------------------------------- */
 export const updateUserProfile = async (req, res) => {
   try {
     const userId = req.user.id;
 
     const { data, error } = await supabase
-      .from("user_profiles")
-      .update({ ...req.body, updated_at: new Date().toISOString() })
-      .eq("user_id", userId)
+      .from("profiles")
+      .update({ ...req.body })
+      .eq("id", userId)
       .select()
       .maybeSingle();
 
@@ -104,13 +98,11 @@ export const updateUserProfile = async (req, res) => {
   }
 };
 
-/* -------------------------------------------------------------------------- */
-/* 🔐 CHANGE PASSWORD (Secure, Supabase native)                               */
-/* -------------------------------------------------------------------------- */
+/* ----------------------------------------------------------------------------
+   4. CHANGE PASSWORD (Supabase native)
+---------------------------------------------------------------------------- */
 export const changePassword = async (req, res) => {
   const { new_password } = req.body;
-
-  const userId = req.user.id;
 
   const { error } = await supabase.auth.updateUser({
     password: new_password,
@@ -121,63 +113,31 @@ export const changePassword = async (req, res) => {
   res.json({ message: "Password updated successfully" });
 };
 
-/* -------------------------------------------------------------------------- */
-/* 🎨 UPDATE PREFERENCES (Theme, Language, Timezone)                          */
-/* -------------------------------------------------------------------------- */
-export const updatePreferences = async (req, res) => {
-  const userId = req.user.id;
-
-  const { error } = await supabase
-    .from("user_preferences")
-    .upsert({ user_id: userId, ...req.body });
-
-  if (error) return res.status(400).json({ error: error.message });
-
-  res.json({ message: "Preferences updated" });
-};
-
-/* -------------------------------------------------------------------------- */
-/* 🔔 NOTIFICATION SETTINGS                                                    */
-/* -------------------------------------------------------------------------- */
+/* ----------------------------------------------------------------------------
+   5. UPDATE NOTIFICATION SETTINGS 
+   (Your DB does NOT have this table, so we store into profiles)
+---------------------------------------------------------------------------- */
 export const updateNotifications = async (req, res) => {
   const userId = req.user.id;
 
-  const updates = { ...req.body, updated_at: new Date().toISOString() };
+  const { email_notifications, push_notifications } = req.body;
 
   const { error } = await supabase
-    .from("user_notifications")
-    .upsert({ user_id: userId, ...updates });
+    .from("profiles")
+    .update({
+      email_notifications,
+      push_notifications
+    })
+    .eq("id", userId);
 
   if (error) return res.status(400).json({ error: error.message });
 
-  res.json({ message: "Notifications updated" });
+  res.json({ message: "Notification settings updated" });
 };
 
-/* -------------------------------------------------------------------------- */
-/* 🛡️ TWO-FACTOR AUTH                                                         */
-/* -------------------------------------------------------------------------- */
-export const toggleTwoFactor = async (req, res) => {
-  const userId = req.user.id;
-  const { enabled, method } = req.body;
-
-  const { error } = await supabase
-    .from("user_security")
-    .upsert({
-      user_id: userId,
-      two_factor_enabled: enabled,
-      two_factor_method: method || "none",
-    });
-
-  if (error) return res.status(400).json({ error: error.message });
-
-  res.json({
-    message: `Two-Factor Authentication ${enabled ? "enabled" : "disabled"}`,
-  });
-};
-
-/* -------------------------------------------------------------------------- */
-/* 🖥️ SESSIONS LIST                                                            */
-/* -------------------------------------------------------------------------- */
+/* ----------------------------------------------------------------------------
+   6. SESSIONS (Your DB has user_sessions table)
+---------------------------------------------------------------------------- */
 export const getSessions = async (req, res) => {
   const userId = req.user.id;
 
@@ -192,9 +152,6 @@ export const getSessions = async (req, res) => {
   res.json(data);
 };
 
-/* -------------------------------------------------------------------------- */
-/* ❌ REVOKE SESSION                                                           */
-/* -------------------------------------------------------------------------- */
 export const revokeSession = async (req, res) => {
   const userId = req.user.id;
   const { id } = req.params;
@@ -208,4 +165,44 @@ export const revokeSession = async (req, res) => {
   if (error) return res.status(400).json({ error: error.message });
 
   res.json({ message: "Session revoked" });
+};
+/* -------------------------------------------------------------------------- */
+/* 🛡️ TWO-FACTOR AUTH                                                         */
+/* -------------------------------------------------------------------------- */
+export const toggleTwoFactor = async (req, res) => {
+  const userId = req.user.id;
+  const { enabled, method } = req.body;
+
+  const { error } = await supabase
+    .from("user_security")
+    .upsert({
+      user_id: userId,
+      two_factor_enabled: enabled,
+      two_factor_method: method || "none",
+      updated_at: new Date().toISOString()
+    });
+
+  if (error) return res.status(400).json({ error: error.message });
+
+  res.json({
+    message: `Two-Factor Authentication ${enabled ? "enabled" : "disabled"}`
+  });
+};
+/* -------------------------------------------------------------------------- */
+/* 🎨 UPDATE PREFERENCES (Theme, Language, Timezone)                          */
+/* -------------------------------------------------------------------------- */
+export const updatePreferences = async (req, res) => {
+  const userId = req.user.id;
+
+  const { error } = await supabase
+    .from("user_preferences")
+    .upsert({
+      user_id: userId,
+      ...req.body,
+      updated_at: new Date().toISOString()
+    });
+
+  if (error) return res.status(400).json({ error: error.message });
+
+  res.json({ message: "Preferences updated" });
 };

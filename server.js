@@ -134,6 +134,8 @@ app.use("/api/admin/seed", seedRoutes);
 app.use("/api/admin/jobs", adminJobRoutes);
 app.use("/api/admin/settings", systemSettings);
 app.use("/api/admin/writing-service", adminWritingServiceRoutes);
+import adminPaymentsRoutes from "./routes/admin/paymentRoutes.js"
+app.use("/api/admin/payments",adminPaymentsRoutes)
 
 // ⭐ PUBLIC CONTENT FOR USERS (notes, mocktests)
 app.use("/api/content", publicContentRoutes);

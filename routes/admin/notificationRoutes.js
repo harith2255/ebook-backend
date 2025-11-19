@@ -9,6 +9,7 @@ import { verifySupabaseAuth, adminOnly } from "../../middleware/authMiddleware.j
 
 const router = express.Router();
 
+router.get("/logs", verifySupabaseAuth, adminOnly, getNotifications);
 router.post("/send", verifySupabaseAuth, adminOnly, sendNotification);
 router.post("/draft", verifySupabaseAuth, adminOnly, saveDraft);
 router.get("/", verifySupabaseAuth, adminOnly, getNotifications);

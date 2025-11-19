@@ -182,3 +182,34 @@ export const getFeedbackForOrder = async (req, res) => {
   if (error) return res.status(400).json({ error: error.message });
   res.json(data);
 };
+export const updateOrderStatus = async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  const allowed = ["Pending", "In Progress", "Draft Review", "Completed"];
+
+  if (!allowed.includes(status)) {
+    return res.status(400).json({ error: "Invalid status" });
+  }
+
+  const { error } = await supabase
+    .from("writing_orders")
+    .update({ status })
+    .eq("id", id);
+
+  if (error) return res.status(400).json({ error: error.message });
+
+  res.json({ message: "Status updated successfully" });
+};
+export const assignWriter = async (req, res) => {
+  const { order_id, author_id } = req.body;
+
+  const { error } = await supabase
+    .from("writing_orders")
+    .update({ author_id })
+    .eq("id", order_id);
+
+  if (error) return res.status(400).json({ error: error.message });
+
+  res.json({ message: "Writer assigned" });
+};

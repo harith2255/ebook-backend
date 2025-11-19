@@ -162,18 +162,43 @@ export const purchaseNote = async (req, res) => {
     const userId = req.user.id;
     const { noteId } = req.body;
 
+    console.log("➡ purchaseNote request:", { userId, noteId });
+
+    // First check if already purchased
+    const { data: existing, error: existingErr } = await supabase
+      .from("notes_purchase")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("note_id", Number(noteId))
+      .maybeSingle();
+
+    if (existing) {
+      return res.json({
+        success: true,
+        alreadyPurchased: true,
+        message: "Note already purchased"
+      });
+    }
+
     const { error } = await supabase
       .from("notes_purchase")
       .insert({
         user_id: userId,
-        note_id: noteId,
+        note_id: Number(noteId),
         purchased_at: new Date(),
       });
 
     if (error) throw error;
 
-    res.json({ success: true, message: "Note purchased successfully" });
+    return res.json({
+      success: true,
+      alreadyPurchased: false,
+      message: "Note purchased successfully"
+    });
+
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.log("❌ purchaseNote crashed:", err);
+    return res.status(500).json({ error: err.message });
   }
 };
+

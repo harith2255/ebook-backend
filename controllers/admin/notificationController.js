@@ -1,112 +1,83 @@
-import supabase from "../../utils/supabaseClient.js";
-import nodemailer from "nodemailer";
+// controllers/admin/notificationController.js
+import { supabaseAdmin } from "../../utils/supabaseClient.js";
 
-/* MAIL TRANSPORTER */
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT || 587),
-  secure: false,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS
-  }
-});
-
-/* ✅ Fetch recipients */
+/* -------------------------------------------------------
+   GET RECIPIENTS
+------------------------------------------------------- */
 async function getRecipients(type, customList) {
-  
-  // ✅ fetch ALL auth.users using admin API
-  const { data: authData } = await supabase.auth.admin.listUsers();
-  const allUsers = authData?.users || [];
+  const { data: authData } = await supabaseAdmin.auth.admin.listUsers();
+  const users = authData?.users || [];
 
-  // ✅ Convert to map for quick lookup
-  const userMap = new Map(
-    allUsers.map(u => [u.id, u.email])
-  );
+  const userMap = new Map(users.map(u => [u.id, u.email]));
 
-  // ✅ ALL USERS
   if (type === "all") {
-    return allUsers.map(u => ({ id: u.id, email: u.email }));
+    return users.map(u => ({ id: u.id, email: u.email }));
   }
-
-  // ✅ FILTER by profiles table
-  let query = supabase.from("profiles").select("id");
-
-  if (type === "active")   query.eq("status", "Active");
-  if (type === "inactive") query.eq("status", "Inactive");
-  if (type === "trial")    query.eq("plan", "Trial");
 
   if (["active", "inactive", "trial"].includes(type)) {
-    const { data: profiles } = await query;
+    let q = supabaseAdmin.from("profiles").select("id");
 
-    if (!profiles) return [];
+    if (type === "active") q.eq("status", "Active");
+    if (type === "inactive") q.eq("status", "Inactive");
+    if (type === "trial") q.eq("plan", "Trial");
 
-    return profiles
-      .map(p => ({
-        id: p.id,
-        email: userMap.get(p.id) // ✅ correct email lookup
-      }))
-      .filter(u => u.email); // remove nulls
+    const { data } = await q;
+
+    return (data || [])
+      .map(p => ({ id: p.id, email: userMap.get(p.id) }))
+      .filter(u => u.email);
   }
 
-  // ✅ Custom list
   if (type === "custom") {
-    return (customList || []).map(email => ({ email }));
+    return (customList || []).map(email => ({ id: null, email }));
   }
 
   return [];
 }
 
-
-/* ✅ Send Notification */
+/* -------------------------------------------------------
+   SEND NOTIFICATION (DEV mode)
+------------------------------------------------------- */
 export const sendNotification = async (req, res) => {
   try {
     const { recipient_type, notification_type, subject, message, custom_list } = req.body;
 
-    // ✅ Get recipients
     const recipients = await getRecipients(recipient_type, custom_list);
-    console.log("Recipients:", recipients);
+    console.log("📦 DEV MODE - Recipients:", recipients);
 
     let delivered = 0;
 
-    /* ✅ EMAIL SENDING (currently disabled because nodemailer not configured) */
+    /* ---------------------------------------------------
+       1️⃣ EMAIL SENDING — DISABLED IN DEV MODE
+       (No SMTP → no error, just skip)
+    --------------------------------------------------- */
     if (notification_type === "email" || notification_type === "both") {
-      console.log("📩 Skipping email (Nodemailer not configured)");
-      delivered = recipients.length; // pretend delivered
-      // If you want real email: enable Mailtrap config
+      console.log("📩 DEV MODE: Skipping email sending.");
+      delivered = recipients.length;  // simulate "delivered"
     }
 
-    /* ✅ Website notifications */
-    /* ✅ Website notifications */
-/* ✅ Website notifications */
-for (const r of recipients) {
-  const userId = r.id;
+    /* ---------------------------------------------------
+       2️⃣ WEBSITE NOTIFICATIONS (stored in DB)
+    --------------------------------------------------- */
+    if (notification_type === "website" || notification_type === "both") {
+      for (const user of recipients) {
+        if (!user.id) continue;
 
-  await supabase.from("user_notifications").insert({
-    user_id: userId,
-    title: subject,
-    message,
-    is_read: false
-  });
-}/* ✅ Website notifications */
-/* ✅ Website notifications */
-for (const user of recipients) {
+        await supabaseAdmin.from("user_notifications").insert({
+          user_id: user.id,
+          title: subject,
+          message,
+          is_read: false
+        });
 
-  if (!user.id) continue; // skip invalid ones
+        delivered++;
+      }
+    }
 
-  await supabase.from("user_notifications").insert({
-    user_id: user.id,
-    title: subject,
-    message,
-    is_read: false
-  });
-}
-
-
-
-
-    /* ✅ Admin log */
-    await supabase.from("notification_logs").insert({
+    /* ---------------------------------------------------
+       3️⃣ LOG NOTIFICATION
+    --------------------------------------------------- */
+    await supabaseAdmin.from("notification_logs").insert({
       subject,
       message,
       recipient_type,
@@ -116,22 +87,23 @@ for (const user of recipients) {
     });
 
     return res.json({
-      message: "Notification sent successfully",
+      message: "DEV MODE: Notification logged",
       delivered,
       recipients
     });
 
   } catch (err) {
     console.error("sendNotification error:", err);
-    return res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Error sending notification (dev mode)" });
   }
 };
 
-
-/* ✅ Save Draft */
+/* -------------------------------------------------------
+   SAVE DRAFT
+------------------------------------------------------- */
 export const saveDraft = async (req, res) => {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from("notification_drafts")
       .insert(req.body)
       .select()
@@ -146,10 +118,12 @@ export const saveDraft = async (req, res) => {
   }
 };
 
-/* ✅ Admin — Recent Notifications */
+/* -------------------------------------------------------
+   GET ALL SENT NOTIFICATIONS
+------------------------------------------------------- */
 export const getNotifications = async (req, res) => {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from("notification_logs")
       .select("*")
       .order("created_at", { ascending: false });
@@ -157,6 +131,7 @@ export const getNotifications = async (req, res) => {
     if (error) return res.status(400).json({ error: error.message });
 
     res.json({ notifications: data });
+
   } catch (err) {
     console.error("getNotifications error:", err);
     res.status(500).json({ error: "Error loading notifications" });

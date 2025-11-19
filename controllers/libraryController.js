@@ -29,16 +29,38 @@ export const getUserLibrary = async (req, res) => {
 
 // ✅ Add a book to library
 export const addBookToLibrary = async (req, res) => {
-  const userId = req.user.id;
-  const { bookId } = req.params;
+  try {
+    const userId = req.user.id;
+    const { bookId } = req.params;
 
-  const { error } = await supabase
-    .from("user_library")
-    .insert([{ user_id: userId, book_id: bookId }]);
+    // check already exists
+    const { data: existing, error: existingErr } = await supabase
+      .from("user_library")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("book_id", bookId)
+      .maybeSingle();
 
-  if (error) return res.status(400).json({ error: error.message });
-  res.json({ message: "Book added to library" });
+    if (existing) {
+      return res.json({ message: "Book already in library", alreadyAdded: true });
+    }
+
+    const { error } = await supabase
+      .from("user_library")
+      .insert([{ user_id: userId, book_id: bookId }]);
+
+    if (error) {
+      console.error("addBookToLibrary insert error:", error);
+      return res.status(400).json({ error: error.message || "Failed to add book" });
+    }
+
+    res.json({ message: "Book added to library", alreadyAdded: false });
+  } catch (err) {
+    console.error("addBookToLibrary crashed:", err);
+    res.status(500).json({ error: err.message || "Server error" });
+  }
 };
+
 
 // ✅ Remove book from library
 export const removeBookFromLibrary = async (req, res) => {
