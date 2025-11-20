@@ -3,66 +3,62 @@ import supabase from "../utils/supabaseClient.js";
 
 /* ------------------------------------------------------------
    GET /api/cart
-   Fetch all cart items for the logged-in user
 ------------------------------------------------------------ */
 export async function getCart(req, res) {
   try {
     const userId = req.user.id;
 
-    console.log("STEP 1: Fetch rows...");
     const { data: rows, error: errRows } = await supabase
       .from("user_cart")
       .select("*")
       .eq("user_id", userId);
 
-    if (errRows) {
-      console.error("Rows error:", errRows);
-      return res.status(500).json({ error: errRows.message });
-    }
-
-    console.log("Rows:", rows);
+    if (errRows) return res.status(500).json({ error: errRows.message });
 
     const enriched = [];
 
     for (const r of rows ?? []) {
-      console.log("Processing row:", r);
 
+      /* ----------------------------------------------------
+         📘 BOOK ITEM
+      ---------------------------------------------------- */
       if (r.book_id) {
-        console.log("STEP 2: Fetching book...");
-        const { data: book, error: errBook } = await supabase
-          .from("books")
-          .select("*")
+        const { data: book } = await supabase
+          .from("ebooks")
+          .select("id, title, author, price, pages, file_url, category")
           .eq("id", r.book_id)
-          .single(); // ⭐ safe option
+          .maybeSingle();
 
-        if (errBook) {
-          console.error("Book error:", errBook);
-          return res.status(500).json({ error: errBook.message });
+        // ❌ Book not found → auto remove from cart
+        if (!book) {
+          await supabase.from("user_cart").delete().eq("id", r.id);
+          continue;
         }
 
         enriched.push({ ...r, book });
       }
 
+      /* ----------------------------------------------------
+         📝 NOTE ITEM
+      ---------------------------------------------------- */
       if (r.note_id) {
-        console.log("STEP 3: Fetching note...");
         const { data: note, error: errNote } = await supabase
           .from("notes")
           .select("*")
           .eq("id", r.note_id)
-          .single();
+          .maybeSingle();
 
-        if (errNote) {
-          console.error("Note error:", errNote);
-          return res.status(500).json({ error: errNote.message });
+        // ❌ Note not found → auto remove
+        if (!note) {
+          await supabase.from("user_cart").delete().eq("id", r.id);
+          continue;
         }
 
         enriched.push({ ...r, note });
       }
     }
 
-    console.log("FINAL enriched:", enriched);
-
-   res.json({ items: enriched });
+    return res.json({ items: enriched });
 
   } catch (err) {
     console.error("Cart GET error:", err);
@@ -70,10 +66,8 @@ export async function getCart(req, res) {
   }
 }
 
-
 /* ------------------------------------------------------------
    POST /api/cart/add
-   Add book or note to cart
 ------------------------------------------------------------ */
 export async function addToCart(req, res) {
   try {
@@ -81,14 +75,13 @@ export async function addToCart(req, res) {
     const { book_id, note_id, quantity = 1 } = req.body;
 
     if ((!book_id && !note_id) || (book_id && note_id)) {
-      return res
-        .status(400)
-        .json({ error: "Provide exactly one of book_id or note_id" });
+      return res.status(400).json({
+        error: "Provide exactly one of book_id or note_id",
+      });
     }
 
     const matchCol = book_id ? { book_id } : { note_id };
 
-    // check if already in cart
     const { data: existing } = await supabase
       .from("user_cart")
       .select("id, quantity")
@@ -97,7 +90,7 @@ export async function addToCart(req, res) {
       .maybeSingle();
 
     if (existing) {
-      const newQty = (existing.quantity || 0) + quantity;
+      const newQty = (existing.quantity || 1) + quantity;
 
       const { data, error } = await supabase
         .from("user_cart")
@@ -110,7 +103,6 @@ export async function addToCart(req, res) {
       return res.json({ success: true, data });
     }
 
-    // insert new
     const { data, error } = await supabase
       .from("user_cart")
       .insert({
@@ -124,16 +116,18 @@ export async function addToCart(req, res) {
 
     if (error) throw error;
 
-    res.json({ success: true, data });
+    return res.json({ success: true, data });
+
   } catch (err) {
     console.error("Cart ADD error:", err);
-    res.status(500).json({ error: err.message || "Failed to add to cart" });
+    return res.status(500).json({
+      error: err.message || "Failed to add to cart",
+    });
   }
 }
 
 /* ------------------------------------------------------------
    PATCH /api/cart/:id
-   Update quantity
 ------------------------------------------------------------ */
 export async function updateCartQuantity(req, res) {
   try {
@@ -156,16 +150,19 @@ export async function updateCartQuantity(req, res) {
       .single();
 
     if (error) throw error;
-    res.json({ success: true, data });
+
+    return res.json({ success: true, data });
+
   } catch (err) {
     console.error("Cart PATCH error:", err);
-    res.status(500).json({ error: err.message || "Failed to update cart" });
+    return res.status(500).json({
+      error: err.message || "Failed to update cart",
+    });
   }
 }
 
 /* ------------------------------------------------------------
    DELETE /api/cart/:id
-   Remove item
 ------------------------------------------------------------ */
 export async function removeCartItem(req, res) {
   try {
@@ -180,9 +177,12 @@ export async function removeCartItem(req, res) {
 
     if (error) throw error;
 
-    res.json({ success: true });
+    return res.json({ success: true });
+
   } catch (err) {
     console.error("Cart DELETE error:", err);
-    res.status(500).json({ error: err.message || "Failed to remove cart item" });
+    return res.status(500).json({
+      error: err.message || "Failed to remove cart item",
+    });
   }
 }

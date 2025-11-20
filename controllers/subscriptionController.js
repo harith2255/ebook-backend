@@ -26,6 +26,7 @@ export const getPlans = async (req, res) => {
 export const getActiveSubscription = async (req, res) => {
   try {
     const userId = req.user.id;
+
     const { data, error } = await supabase
       .from("user_subscriptions")
       .select("*, plan:subscription_plans(*)")
@@ -36,12 +37,25 @@ export const getActiveSubscription = async (req, res) => {
       .maybeSingle();
 
     if (error) throw error;
-    res.json(data || null);
+
+    if (!data) return res.json(null);
+
+    // flatten structure for frontend
+    const active = {
+      id: data.plan.id,
+      name: data.plan.name,
+      price: data.plan.price,
+      period: data.plan.period,
+      renewsOn: data.expires_at,   // important
+    };
+
+    res.json(active);
   } catch (err) {
     console.error("getActiveSubscription error:", err.message || err);
     res.status(500).json({ error: "Failed to fetch subscription" });
   }
 };
+
 
 /**
  * POST /api/subscriptions/upgrade
@@ -55,7 +69,7 @@ export const upgradeSubscription = async (req, res) => {
 
     if (!planId) return res.status(400).json({ error: "planId required" });
 
-    // fetch plan
+    // fetch selected plan
     const { data: plan, error: planErr } = await supabase
       .from("subscription_plans")
       .select("*")
@@ -64,40 +78,36 @@ export const upgradeSubscription = async (req, res) => {
 
     if (planErr) throw planErr;
 
-    // simulate payment: create transaction
-    const txAmount = plan.price;
-   const { error: txErr } = await supabase
-  .from("payments_transactions")
-  .insert({
-    user_id: userId,
-    plan_id: planId,
-    amount: txAmount,
-    currency: "INR",            // ✔ REQUIRED
-    method: "manual-test",
-    status: "completed",
-    description: `Purchase ${plan.name}`
-  });
-
-
+    // create transaction
+    const { error: txErr } = await supabase
+      .from("payments_transactions")
+      .insert({
+        user_id: userId,
+        plan_id: planId,
+        amount: plan.price,
+        currency: "INR",
+        method: "manual-test",
+        status: "completed",
+        description: `Purchase ${plan.name}`
+      });
 
     if (txErr) throw txErr;
 
     // compute expiry date
     const now = new Date();
-    let expiresAt = null;
-    if (plan.period === "monthly") {
-      expiresAt = new Date(now.setMonth(now.getMonth() + 1)).toISOString();
-    } else {
-      expiresAt = new Date(now.setFullYear(now.getFullYear() + 1)).toISOString();
-    }
+    const expiresAt =
+      plan.period === "monthly"
+        ? new Date(now.setMonth(now.getMonth() + 1)).toISOString()
+        : new Date(now.setFullYear(now.getFullYear() + 1)).toISOString();
 
-    // insert user subscription (deactivate old active subscriptions)
+    // deactivate old subscriptions
     await supabase
       .from("user_subscriptions")
       .update({ status: "expired" })
       .eq("user_id", userId)
       .eq("status", "active");
 
+    // create new subscription
     const { data: newSub, error: subErr } = await supabase
       .from("user_subscriptions")
       .insert({
@@ -112,9 +122,20 @@ export const upgradeSubscription = async (req, res) => {
 
     if (subErr) throw subErr;
 
-    res.json({ success: true, subscription: newSub });
+    // return a **flattened clean object** to frontend
+    res.json({
+      success: true,
+      subscription: {
+        id: plan.id,
+        name: plan.name,
+        price: plan.price,
+        period: plan.period,
+        renewsOn: expiresAt,
+      }
+    });
   } catch (err) {
     console.error("upgradeSubscription error:", err.message || err);
     res.status(500).json({ error: "Upgrade failed" });
   }
 };
+
