@@ -1,68 +1,76 @@
 import supabase from "../utils/supabaseClient.js";
 
-// ✅ Get all books in user's library
+/* ============================================
+   📘 GET ALL BOOKS IN USER LIBRARY
+============================================ */
 export const getUserLibrary = async (req, res) => {
   const userId = req.user.id;
+
   const { data, error } = await supabase
     .from("user_library")
     .select(`
-  id,
-  progress,
-  added_at,
-  books (
-    id,
-    title,
-    author,
-    genre,
-    cover_url,
-    published_year,
-    pages,
-    price
-  )
-`)
-
+      id,
+      progress,
+      added_at,
+      book_id,
+      ebooks:ebooks!inner (
+        id,
+        title,
+        author,
+        category,
+        description,
+        file_url,
+        pages,
+        price,
+        sales
+      )
+    `)
     .eq("user_id", userId);
 
   if (error) return res.status(400).json({ error: error.message });
   res.json(data);
 };
 
-// ✅ Add a book to library
+/* ============================================
+   ➕ ADD BOOK TO LIBRARY
+============================================ */
 export const addBookToLibrary = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const { bookId } = req.params;
+  const userId = req.user.id;
+  const { bookId } = req.params;
 
-    // check already exists
-    const { data: existing, error: existingErr } = await supabase
-      .from("user_library")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("book_id", bookId)
-      .maybeSingle();
+  // Ensure book exists in ebooks table
+  const { data: book } = await supabase
+    .from("ebooks")
+    .select("id")
+    .eq("id", bookId)
+    .maybeSingle();
 
-    if (existing) {
-      return res.json({ message: "Book already in library", alreadyAdded: true });
-    }
+  if (!book) return res.status(400).json({ error: "Book does not exist" });
 
-    const { error } = await supabase
-      .from("user_library")
-      .insert([{ user_id: userId, book_id: bookId }]);
+  // Check if already added
+  const { data: existing } = await supabase
+    .from("user_library")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("book_id", bookId)
+    .maybeSingle();
 
-    if (error) {
-      console.error("addBookToLibrary insert error:", error);
-      return res.status(400).json({ error: error.message || "Failed to add book" });
-    }
+  if (existing)
+    return res.json({ message: "Book already in library", alreadyAdded: true });
 
-    res.json({ message: "Book added to library", alreadyAdded: false });
-  } catch (err) {
-    console.error("addBookToLibrary crashed:", err);
-    res.status(500).json({ error: err.message || "Server error" });
-  }
+  // Insert new row
+  const { error } = await supabase
+    .from("user_library")
+    .insert([{ user_id: userId, book_id: bookId, progress: 0 }]);
+
+  if (error) return res.status(400).json({ error: error.message });
+
+  res.json({ message: "Book added to library", alreadyAdded: false });
 };
 
-
-// ✅ Remove book from library
+/* ============================================
+   ❌ REMOVE BOOK FROM LIBRARY
+============================================ */
 export const removeBookFromLibrary = async (req, res) => {
   const userId = req.user.id;
   const { bookId } = req.params;
@@ -74,30 +82,34 @@ export const removeBookFromLibrary = async (req, res) => {
     .eq("book_id", bookId);
 
   if (error) return res.status(400).json({ error: error.message });
+
   res.json({ message: "Book removed from library" });
 };
 
-// ✅ Recently added books
+/* ============================================
+   🆕 RECENTLY ADDED BOOKS
+============================================ */
 export const getRecentBooks = async (req, res) => {
   const userId = req.user.id;
+
   const { data, error } = await supabase
     .from("user_library")
     .select(`
-  id,
-  progress,
-  added_at,
-  books (
-    id,
-    title,
-    author,
-    genre,
-    cover_url,
-    published_year,
-    pages,
-    price
-  )
-`)
-
+      id,
+      progress,
+      added_at,
+      ebooks (
+        id,
+        title,
+        author,
+        category,
+        description,
+        file_url,
+        pages,
+        price,
+        sales
+      )
+    `)
     .eq("user_id", userId)
     .order("added_at", { ascending: false })
     .limit(5);
@@ -106,27 +118,30 @@ export const getRecentBooks = async (req, res) => {
   res.json(data);
 };
 
-// ✅ Currently reading
+/* ============================================
+   📖 CURRENTLY READING
+============================================ */
 export const getCurrentlyReading = async (req, res) => {
   const userId = req.user.id;
+
   const { data, error } = await supabase
     .from("user_library")
     .select(`
-  id,
-  progress,
-  added_at,
-  books (
-    id,
-    title,
-    author,
-    genre,
-    cover_url,
-    published_year,
-    pages,
-    price
-  )
-`)
-
+      id,
+      progress,
+      added_at,
+      ebooks (
+        id,
+        title,
+        author,
+        category,
+        description,
+        file_url,
+        pages,
+        price,
+        sales
+      )
+    `)
     .eq("user_id", userId)
     .lt("progress", 100)
     .gt("progress", 0);
@@ -135,27 +150,30 @@ export const getCurrentlyReading = async (req, res) => {
   res.json(data);
 };
 
-// ✅ Completed books
+/* ============================================
+   ✅ COMPLETED BOOKS
+============================================ */
 export const getCompletedBooks = async (req, res) => {
   const userId = req.user.id;
+
   const { data, error } = await supabase
     .from("user_library")
     .select(`
-  id,
-  progress,
-  added_at,
-  books (
-    id,
-    title,
-    author,
-    genre,
-    cover_url,
-    published_year,
-    pages,
-    price
-  )
-`)
-
+      id,
+      progress,
+      added_at,
+      ebooks (
+        id,
+        title,
+        author,
+        category,
+        description,
+        file_url,
+        pages,
+        price,
+        sales
+      )
+    `)
     .eq("user_id", userId)
     .eq("progress", 100);
 
@@ -163,36 +181,39 @@ export const getCompletedBooks = async (req, res) => {
   res.json(data);
 };
 
-// ✅ Search user's library
+/* ============================================
+   🔍 SEARCH LIBRARY
+============================================ */
 export const searchLibrary = async (req, res) => {
   try {
     const userId = req.user.id;
     const { query } = req.query;
 
-    // First, get all user library entries with book details
     const { data, error } = await supabase
       .from("user_library")
       .select(`
         id,
         progress,
         added_at,
-        books (
+        ebooks (
           id,
           title,
           author,
-          genre,
-          cover_url,
+          category,
+          description,
+          file_url,
           pages,
-          price
+          price,
+          sales
         )
       `)
       .eq("user_id", userId);
 
     if (error) throw error;
 
-    // Filter results manually on backend (case-insensitive)
+    // Manual case-insensitive filter
     const filtered = data.filter((entry) =>
-      entry.books?.title?.toLowerCase().includes(query.toLowerCase())
+      entry.ebooks?.title?.toLowerCase().includes(query.toLowerCase())
     );
 
     res.json(filtered);
@@ -202,9 +223,9 @@ export const searchLibrary = async (req, res) => {
   }
 };
 
-// ====== 📂 COLLECTIONS ======
-
-// ✅ Create a new collection
+/* ============================================
+   📚 COLLECTIONS
+============================================ */
 export const createCollection = async (req, res) => {
   const userId = req.user.id;
   const { name } = req.body;
@@ -217,9 +238,9 @@ export const createCollection = async (req, res) => {
   res.json({ message: "Collection created" });
 };
 
-// ✅ Get all collections
 export const getAllCollections = async (req, res) => {
   const userId = req.user.id;
+
   const { data, error } = await supabase
     .from("collections")
     .select("*")
@@ -229,20 +250,31 @@ export const getAllCollections = async (req, res) => {
   res.json(data);
 };
 
-// ✅ Get books in collection
 export const getCollectionBooks = async (req, res) => {
   const { id } = req.params;
 
   const { data, error } = await supabase
     .from("collection_books")
-    .select("*, books(*)")
+    .select(`
+      *,
+      ebooks (
+        id,
+        title,
+        author,
+        category,
+        description,
+        file_url,
+        pages,
+        price,
+        sales
+      )
+    `)
     .eq("collection_id", id);
 
   if (error) return res.status(400).json({ error: error.message });
   res.json(data);
 };
 
-// ✅ Add book to collection
 export const addBookToCollection = async (req, res) => {
   const { id, bookId } = req.params;
 
@@ -251,10 +283,10 @@ export const addBookToCollection = async (req, res) => {
     .insert([{ collection_id: id, book_id: bookId }]);
 
   if (error) return res.status(400).json({ error: error.message });
+
   res.json({ message: "Book added to collection" });
 };
 
-// ✅ Remove book from collection
 export const removeBookFromCollection = async (req, res) => {
   const { id, bookId } = req.params;
 
@@ -265,10 +297,10 @@ export const removeBookFromCollection = async (req, res) => {
     .eq("book_id", bookId);
 
   if (error) return res.status(400).json({ error: error.message });
+
   res.json({ message: "Book removed from collection" });
 };
 
-// ✅ Delete entire collection
 export const deleteCollection = async (req, res) => {
   const { id } = req.params;
 
@@ -278,5 +310,6 @@ export const deleteCollection = async (req, res) => {
     .eq("id", id);
 
   if (error) return res.status(400).json({ error: error.message });
+
   res.json({ message: "Collection deleted" });
 };

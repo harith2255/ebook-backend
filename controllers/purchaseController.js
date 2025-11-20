@@ -47,14 +47,16 @@ export const purchaseBook = async (req, res) => {
       ]);
     }
 
-    // 3️⃣ UPDATE book sales count
+    // 3️⃣ UPDATE book sales count (use "books" table)
     const { data: book, error: fetchError } = await supabase
       .from("ebooks")
       .select("sales")
       .eq("id", bookId)
       .single();
 
-    if (fetchError) return res.status(500).json({ error: "Could not fetch current sales" });
+    if (fetchError) {
+      return res.status(500).json({ error: "Could not fetch sales" });
+    }
 
     const newSales = (book?.sales || 0) + 1;
 
@@ -66,10 +68,14 @@ export const purchaseBook = async (req, res) => {
     res.json({ message: "Book purchased & saved to library" });
 
   } catch (err) {
+
     console.error("purchaseBook error:", err);
+console.error("Supabase error details:", err?.message, err?.details);
+
     res.status(500).json({ error: "Server error purchasing book" });
   }
 };
+
 
 
 
@@ -94,6 +100,7 @@ export const checkPurchase = async (req, res) => {
 
   } catch (err) {
     console.error("checkPurchase error:", err);
+    console.error("Supabase error details:", err?.message, err?.details);
     res.status(500).json({ error: "Error checking purchase" });
   }
 };

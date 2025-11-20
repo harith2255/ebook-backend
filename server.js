@@ -147,6 +147,16 @@ import paymentsRoutes from "./routes/paymentRoutes.js";
 app.use("/api/subscriptions", subscriptionsRoutes);
 app.use("/api/payments", paymentsRoutes);
 
+import { cartRouter } from "./routes/cartRoutes.js";
+
+app.use("/api/cart", cartRouter);
+
+import notificationsRoutes from "./routes/notificationRoutes.js";
+
+app.use("/api/notifications", notificationsRoutes);
+
+
+
 
 // Base Route
 app.get("/", (req, res) => {
