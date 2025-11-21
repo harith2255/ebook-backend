@@ -1,5 +1,6 @@
 // controllers/customerController.js
 import supabase from "../../utils/supabaseClient.js";
+
 import nodemailer from "nodemailer";
 
 /* ---------------------------------------------------------
@@ -208,30 +209,54 @@ export const addSubscription = async (req, res) => {
 /* ---------------------------------------------------------
    DELETE CUSTOMER (Auth User + Profile)
 --------------------------------------------------------- */
+/* ---------------------------------------------------------
+   DELETE CUSTOMER (Auth + All Related Tables)
+--------------------------------------------------------- */
 export const deleteCustomer = async (req, res) => {
   try {
     const { id } = req.params;
 
     console.log("Deleting user:", id);
 
-    // 1. Delete related rows manually
-    await supabase.from("subscriptions").delete().eq("user_id", id);
-    await supabase.from("book_sales").delete().eq("user_id", id);
-    await supabase.from("activity_log").delete().eq("user_id", id);
-    await supabase.from("profiles").delete().eq("id", id);
+    // 1️⃣ DELETE ALL RELATED TABLES FIRST
+    const tablesToClean = [
+      "profiles",
+      "subscriptions",
+      "book_sales",
+      "activity_log",
+      "user_notifications",
+      "payments_transactions",
+      "writing_orders",
+      "notes",
+      "purchases",
+      "mock_test_attempts",
+      "jobs_applications"
+    ];
 
-    // 2. Delete from Auth
-    const { error: delErr } = await supabase.auth.admin.deleteUser(id);
-    if (delErr) {
-      console.error("DELETE ERROR ->", delErr);
-      return res.status(400).json({ error: delErr.message });
+    for (const table of tablesToClean) {
+      await supabase.from(table).delete().eq("user_id", id);
     }
 
-    res.json({ message: "User & all related data deleted successfully" });
+    // ❗ profiles table uses id not user_id
+    await supabase.from("profiles").delete().eq("id", id);
+
+    // 2️⃣ DELETE FROM AUTH
+    const { error: authErr } = await supabase.auth.admin.deleteUser(id);
+
+    if (authErr) {
+      console.error("Auth delete error:", authErr.message);
+      return res.status(400).json({ error: authErr.message });
+    }
+
+    // 3️⃣ SUCCESS
+    res.json({
+      message: "User deleted from auth + all related tables successfully",
+    });
 
   } catch (err) {
     console.error("deleteCustomer error:", err);
-    res.status(500).json({ error: "Server error deleting customer" });
+    return res.status(500).json({
+      error: "Server error deleting customer",
+    });
   }
 };
-

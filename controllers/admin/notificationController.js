@@ -2,104 +2,132 @@
 import { supabaseAdmin } from "../../utils/supabaseClient.js";
 
 /* -------------------------------------------------------
-   GET RECIPIENTS
+   1️⃣ FETCH ALL USERS (with pagination)
 ------------------------------------------------------- */
-async function getRecipients(type, customList) {
-  const { data: authData } = await supabaseAdmin.auth.admin.listUsers();
-  const users = authData?.users || [];
+async function fetchAllUsers() {
+  let page = 1;
+  const perPage = 100;
+  let all = [];
 
-  const userMap = new Map(users.map(u => [u.id, u.email]));
+  while (true) {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({
+      page,
+      perPage,
+    });
 
-  if (type === "all") {
-    return users.map(u => ({ id: u.id, email: u.email }));
+    if (error) {
+      console.error("❌ listUsers pagination error:", error);
+      break;
+    }
+
+    all = [...all, ...data.users];
+
+    if (data.users.length < perPage) break;
+    page++;
   }
 
-  if (["active", "inactive", "trial"].includes(type)) {
-    let q = supabaseAdmin.from("profiles").select("id");
-
-    if (type === "active") q.eq("status", "Active");
-    if (type === "inactive") q.eq("status", "Inactive");
-    if (type === "trial") q.eq("plan", "Trial");
-
-    const { data } = await q;
-
-    return (data || [])
-      .map(p => ({ id: p.id, email: userMap.get(p.id) }))
-      .filter(u => u.email);
-  }
-
-  if (type === "custom") {
-    return (customList || []).map(email => ({ id: null, email }));
-  }
-
-  return [];
+  return all;
 }
 
 /* -------------------------------------------------------
-   SEND NOTIFICATION (DEV mode)
+   2️⃣ GET RECIPIENTS
+------------------------------------------------------- */
+async function getRecipients(type, customList = []) {
+  const users = await fetchAllUsers();
+
+  if (!users.length) return [];
+
+  switch (type) {
+    case "all":
+      return users;
+
+    case "active":
+      return users.filter(u => u.user_metadata?.status === "active");
+
+    case "inactive":
+      return users.filter(u => u.user_metadata?.status === "inactive");
+
+    case "trial":
+      return users.filter(u => u.user_metadata?.plan === "trial");
+
+    case "custom":
+      return users.filter(u => customList.includes(u.email));
+
+    default:
+      return [];
+  }
+}
+
+/* -------------------------------------------------------
+   3️⃣ SEND NOTIFICATION
 ------------------------------------------------------- */
 export const sendNotification = async (req, res) => {
   try {
-    const { recipient_type, notification_type, subject, message, custom_list } = req.body;
+    const { recipient_type, notification_type, subject, message, custom_list } =
+      req.body;
 
     const recipients = await getRecipients(recipient_type, custom_list);
-    console.log("📦 DEV MODE - Recipients:", recipients);
+    console.log("📦 Sending to recipients:", recipients.length);
+
+    if (!recipients.length) {
+      return res.json({ message: "No recipients match your selection." });
+    }
 
     let delivered = 0;
 
-    /* ---------------------------------------------------
-       1️⃣ EMAIL SENDING — DISABLED IN DEV MODE
-       (No SMTP → no error, just skip)
-    --------------------------------------------------- */
+    /* -----------------------------
+       📧 EMAIL (DEV MODE SKIPPED)
+    ------------------------------- */
     if (notification_type === "email" || notification_type === "both") {
-      console.log("📩 DEV MODE: Skipping email sending.");
-      delivered = recipients.length;  // simulate "delivered"
+      console.log("📨 Email sending skipped (dev mode)");
+      delivered += recipients.length;
     }
 
-    /* ---------------------------------------------------
-       2️⃣ WEBSITE NOTIFICATIONS (stored in DB)
-    --------------------------------------------------- */
+    /* -----------------------------
+       🌐 WEBSITE NOTIFICATIONS
+    ------------------------------- */
     if (notification_type === "website" || notification_type === "both") {
       for (const user of recipients) {
-        if (!user.id) continue;
-
         await supabaseAdmin.from("user_notifications").insert({
           user_id: user.id,
           title: subject,
           message,
-          is_read: false
+          link: "/notifications",
+          is_read: false,
         });
-
-        delivered++;
       }
+      delivered += recipients.length;
     }
 
-    /* ---------------------------------------------------
-       3️⃣ LOG NOTIFICATION
-    --------------------------------------------------- */
+    /* -----------------------------
+       📝 LOG ACTION (ONE ENTRY ONLY)
+    ------------------------------- */
     await supabaseAdmin.from("notification_logs").insert({
+      id: crypto.randomUUID(),
       subject,
       message,
       recipient_type,
-      notification_type,
       delivered_count: delivered,
-      custom_list
+      created_at: new Date(),
     });
 
     return res.json({
-      message: "DEV MODE: Notification logged",
+      message: "Notification sent successfully",
       delivered,
-      recipients
+      recipients: recipients.map(u => ({
+        id: u.id,
+        email: u.email,
+      })),
     });
 
   } catch (err) {
-    console.error("sendNotification error:", err);
-    res.status(500).json({ error: "Error sending notification (dev mode)" });
+    console.error("❌ sendNotification error:", err);
+    return res.status(500).json({ error: "Error sending notification" });
   }
 };
 
 /* -------------------------------------------------------
-   SAVE DRAFT
+   4️⃣ SAVE DRAFT
 ------------------------------------------------------- */
 export const saveDraft = async (req, res) => {
   try {
@@ -113,13 +141,13 @@ export const saveDraft = async (req, res) => {
 
     res.json({ message: "Draft saved", draft: data });
   } catch (err) {
-    console.error("saveDraft error:", err);
+    console.error("❌ saveDraft error:", err);
     res.status(500).json({ error: "Error saving draft" });
   }
 };
 
 /* -------------------------------------------------------
-   GET ALL SENT NOTIFICATIONS
+   5️⃣ GET ALL SENT NOTIFICATIONS (ADMIN VIEW)
 ------------------------------------------------------- */
 export const getNotifications = async (req, res) => {
   try {
@@ -131,9 +159,8 @@ export const getNotifications = async (req, res) => {
     if (error) return res.status(400).json({ error: error.message });
 
     res.json({ notifications: data });
-
   } catch (err) {
-    console.error("getNotifications error:", err);
+    console.error("❌ getNotifications error:", err);
     res.status(500).json({ error: "Error loading notifications" });
   }
 };

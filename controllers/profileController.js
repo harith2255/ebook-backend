@@ -1,9 +1,10 @@
 import supabase from "../utils/supabaseClient.js";
 import sharp from "sharp";
 
-/* ----------------------------------------------------------------------------
-   1. UPLOAD AVATAR  (writes to profiles.avatar_url)
----------------------------------------------------------------------------- */
+/* ============================================================================
+   1. UPLOAD AVATAR
+   POST /api/profile/avatar
+============================================================================ */
 export const uploadAvatar = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -12,7 +13,7 @@ export const uploadAvatar = async (req, res) => {
       return res.status(400).json({ error: "No file uploaded" });
     }
 
-    // optimize image
+    // Optimize image (resize + compress)
     const optimized = await sharp(req.file.buffer)
       .resize(300, 300)
       .png()
@@ -33,7 +34,7 @@ export const uploadAvatar = async (req, res) => {
       .from("avatars")
       .getPublicUrl(filePath);
 
-    // update profile
+    // Save avatar to DB
     await supabase
       .from("profiles")
       .update({ avatar_url: urlData.publicUrl })
@@ -49,42 +50,78 @@ export const uploadAvatar = async (req, res) => {
   }
 };
 
-/* ----------------------------------------------------------------------------
-   2. GET USER PROFILE  (profiles + notifications)
----------------------------------------------------------------------------- */
+/* ============================================================================
+   2. GET USER PROFILE (profile + security + preferences)
+   GET /api/profile
+============================================================================ */
 export const getUserProfile = async (req, res) => {
   const userId = req.user.id;
 
-  const { data: profile, error: pErr } = await supabase
+  // Load profile
+  const { data: profile, error: profileErr } = await supabase
     .from("profiles")
     .select("*")
     .eq("id", userId)
     .maybeSingle();
 
-  if (pErr) return res.status(400).json({ error: pErr.message });
+  if (profileErr)
+    return res.status(400).json({ error: profileErr.message });
 
-  // user notifications
-  const { data: notifications } = await supabase
-    .from("user_notifications")
+  // Load preferences
+  const { data: preferences } = await supabase
+    .from("user_preferences")
     .select("*")
-    .eq("user_id", userId);
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  // Load security (2FA)
+  const { data: security } = await supabase
+    .from("user_security")
+    .select("*")
+    .eq("user_id", userId)
+    .maybeSingle();
 
   res.json({
     profile,
-    notifications
+    security: {
+      two_factor_enabled: security?.two_factor_enabled || false,
+      method: security?.two_factor_method || "none",
+    },
+    preferences: preferences || {},
   });
 };
 
-/* ----------------------------------------------------------------------------
-   3. UPDATE PROFILE
----------------------------------------------------------------------------- */
+/* ============================================================================
+   3. UPDATE PROFILE INFORMATION
+   PUT /api/profile
+============================================================================ */
 export const updateUserProfile = async (req, res) => {
   try {
     const userId = req.user.id;
 
+    const allowedFields = [
+      "first_name",
+      "last_name",
+      "email",
+      "phone",
+      "dob",
+      "institution",
+      "field_of_study",
+      "academic_level",
+      "bio",
+      "avatar_url",
+    ];
+
+    const payload = {};
+    for (const key of allowedFields) {
+      if (req.body[key] !== undefined) {
+        payload[key] = req.body[key];
+      }
+    }
+
     const { data, error } = await supabase
       .from("profiles")
-      .update({ ...req.body })
+      .update(payload)
       .eq("id", userId)
       .select()
       .maybeSingle();
@@ -93,30 +130,45 @@ export const updateUserProfile = async (req, res) => {
 
     res.json({ message: "Profile updated", profile: data });
   } catch (err) {
-    console.error("SERVER ERROR:", err);
+    console.error("UPDATE PROFILE ERROR:", err);
     res.status(500).json({ error: "Unable to update profile" });
   }
 };
 
-/* ----------------------------------------------------------------------------
-   4. CHANGE PASSWORD (Supabase native)
----------------------------------------------------------------------------- */
+/* ============================================================================
+   4. CHANGE PASSWORD (Supabase Auth)
+   PUT /api/profile/security/password
+============================================================================ */
 export const changePassword = async (req, res) => {
-  const { new_password } = req.body;
+  try {
+    const userId = req.user.id; // from your JWT middleware
+    const { new_password } = req.body;
 
-  const { error } = await supabase.auth.updateUser({
-    password: new_password,
-  });
+    if (!new_password) {
+      return res.status(400).json({ error: "New password required" });
+    }
 
-  if (error) return res.status(400).json({ error: error.message });
+    // Use ADMIN API to update password without needing Supabase session
+    const { data, error } = await supabase.auth.admin.updateUserById(userId, {
+      password: new_password,
+    });
 
-  res.json({ message: "Password updated successfully" });
+    if (error) {
+      console.error("Admin Password Update Error:", error);
+      return res.status(400).json({ error: error.message });
+    }
+
+    return res.json({ message: "Password updated successfully" });
+  } catch (err) {
+    console.error("SERVER ERROR:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
 };
 
-/* ----------------------------------------------------------------------------
-   5. UPDATE NOTIFICATION SETTINGS 
-   (Your DB does NOT have this table, so we store into profiles)
----------------------------------------------------------------------------- */
+/* ============================================================================
+   5. UPDATE NOTIFICATION SETTINGS (Stored inside profiles)
+   PUT /api/profile/notifications
+============================================================================ */
 export const updateNotifications = async (req, res) => {
   const userId = req.user.id;
 
@@ -125,8 +177,8 @@ export const updateNotifications = async (req, res) => {
   const { error } = await supabase
     .from("profiles")
     .update({
-      email_notifications,
-      push_notifications
+      email_notifications: email_notifications || {},
+      push_notifications: push_notifications || {},
     })
     .eq("id", userId);
 
@@ -135,9 +187,10 @@ export const updateNotifications = async (req, res) => {
   res.json({ message: "Notification settings updated" });
 };
 
-/* ----------------------------------------------------------------------------
-   6. SESSIONS (Your DB has user_sessions table)
----------------------------------------------------------------------------- */
+/* ============================================================================
+   6. GET ACTIVE SESSIONS
+   GET /api/profile/sessions
+============================================================================ */
 export const getSessions = async (req, res) => {
   const userId = req.user.id;
 
@@ -149,9 +202,13 @@ export const getSessions = async (req, res) => {
 
   if (error) return res.status(400).json({ error: error.message });
 
-  res.json(data);
+  res.json(data || []);
 };
 
+/* ============================================================================
+   7. REVOKE SESSION
+   DELETE /api/profile/sessions/:id
+============================================================================ */
 export const revokeSession = async (req, res) => {
   const userId = req.user.id;
   const { id } = req.params;
@@ -166,9 +223,11 @@ export const revokeSession = async (req, res) => {
 
   res.json({ message: "Session revoked" });
 };
-/* -------------------------------------------------------------------------- */
-/* 🛡️ TWO-FACTOR AUTH                                                         */
-/* -------------------------------------------------------------------------- */
+
+/* ============================================================================
+   8. TOGGLE TWO-FACTOR AUTH (2FA)
+   PUT /api/profile/security/2fa
+============================================================================ */
 export const toggleTwoFactor = async (req, res) => {
   const userId = req.user.id;
   const { enabled, method } = req.body;
@@ -178,29 +237,33 @@ export const toggleTwoFactor = async (req, res) => {
     .upsert({
       user_id: userId,
       two_factor_enabled: enabled,
-      two_factor_method: method || "none",
-      updated_at: new Date().toISOString()
+      two_factor_method: enabled ? method : "none",
+      updated_at: new Date().toISOString(),
     });
 
   if (error) return res.status(400).json({ error: error.message });
 
   res.json({
-    message: `Two-Factor Authentication ${enabled ? "enabled" : "disabled"}`
+    message: `Two-Factor Authentication ${enabled ? "enabled" : "disabled"}`,
   });
 };
-/* -------------------------------------------------------------------------- */
-/* 🎨 UPDATE PREFERENCES (Theme, Language, Timezone)                          */
-/* -------------------------------------------------------------------------- */
+
+/* ============================================================================
+   9. UPDATE PREFERENCES (theme, timezone, language)
+   PUT /api/profile/preferences
+============================================================================ */
 export const updatePreferences = async (req, res) => {
   const userId = req.user.id;
 
+  const payload = {
+    ...req.body,
+    user_id: userId,
+    updated_at: new Date().toISOString(),
+  };
+
   const { error } = await supabase
     .from("user_preferences")
-    .upsert({
-      user_id: userId,
-      ...req.body,
-      updated_at: new Date().toISOString()
-    });
+    .upsert(payload, { onConflict: "user_id" });
 
   if (error) return res.status(400).json({ error: error.message });
 

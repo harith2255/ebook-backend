@@ -7,8 +7,7 @@ import {
   updateOrder,
   sendFeedback,
   getFeedbackForOrder,
-  updateOrderStatus,
-  assignWriter
+
 } from "../controllers/writingController.js";
 
 import { verifySupabaseAuth } from "../middleware/authMiddleware.js";

@@ -1,17 +1,21 @@
 import supabase from "../../utils/supabaseClient.js";
 
-/* ✅ Get all writing orders */
+/* ===============================
+   GET ALL ORDERS
+=============================== */
 export const getAllOrders = async (req, res) => {
   const { data, error } = await supabase
     .from("writing_orders")
-    .select("*, users(email, name)")
+    .select("*")
     .order("created_at", { ascending: false });
 
   if (error) return res.status(400).json({ error: error.message });
   res.json(data);
 };
 
-/* ✅ Get only pending orders */
+/* ===============================
+   GET ONLY PENDING ORDERS
+=============================== */
 export const getPendingOrders = async (req, res) => {
   const { data, error } = await supabase
     .from("writing_orders")
@@ -23,133 +27,118 @@ export const getPendingOrders = async (req, res) => {
   res.json(data);
 };
 
-/* ✅ Admin accepts a writing order */
+/* ===============================
+   ADMIN ACCEPTS ORDER (Admin = Writer)
+=============================== */
 export const acceptOrder = async (req, res) => {
   try {
-    const adminId = req.user.id; // ensure req.user is admin
+    const adminId = req.user.id;
     const { id } = req.params;
 
-    const { data: order, error: fetchError } = await supabase
+    // Confirm order exists
+    const { data: order } = await supabase
       .from("writing_orders")
-      .select("*")
+      .select("user_id")
       .eq("id", id)
       .single();
 
-    if (fetchError || !order)
-      return res.status(404).json({ error: "Order not found" });
+    if (!order) return res.status(404).json({ error: "Order not found" });
 
-    // ✅ Update order status and assign admin
-    const { error: updateError } = await supabase
+    // Update order status
+    const { error } = await supabase
       .from("writing_orders")
       .update({
         status: "In Progress",
-        author_id: adminId,
+        author_id: adminId, // admin becomes writer
         accepted_at: new Date(),
       })
       .eq("id", id);
 
-    if (updateError) throw updateError;
+    if (error) throw error;
 
-    // ✅ Notify user
+    // Notify User
     await supabase.from("user_notifications").insert([
       {
         user_id: order.user_id,
         title: "Order Accepted",
-        message: `Your writing request (#${id}) has been accepted and is now being worked on.`,
+        message: `Your writing request (#${id}) is now being worked on.`,
         created_at: new Date(),
-        is_read: false,
       },
     ]);
 
-    res.json({ message: "Order accepted successfully!" });
+    res.json({ message: "Order accepted. Admin is now writing." });
   } catch (err) {
-    console.error("Accept order error:", err.message);
-    res.status(500).json({ error: "Error accepting order" });
+    res.status(500).json({ error: err.message });
   }
 };
 
-/* ✅ Admin uploads completed work or notes */
+/* ===============================
+   ADMIN COMPLETES ORDER
+=============================== */
 export const completeOrder = async (req, res) => {
   try {
     const adminId = req.user.id;
     const { id } = req.params;
-    const { notes_url, message } = req.body;
+    const { content_text, notes_url } = req.body; // admin can upload file OR type text
 
-    // Check if order exists and belongs to admin
-    const { data: order, error: fetchError } = await supabase
+    // Fetch order
+    const { data: order } = await supabase
       .from("writing_orders")
-      .select("id, author_id, user_id")
+      .select("user_id, author_id")
       .eq("id", id)
       .single();
 
-    if (fetchError || !order)
-      return res.status(404).json({ error: "Order not found" });
-
+    if (!order) return res.status(404).json({ error: "Order not found" });
     if (order.author_id !== adminId)
-      return res
-        .status(403)
-        .json({ error: "Unauthorized: You are not assigned to this order" });
+      return res.status(403).json({ error: "Unauthorized" });
 
-    // ✅ Update order status and attach notes file
-    const { error: updateError } = await supabase
+    // Complete order
+    const { error } = await supabase
       .from("writing_orders")
       .update({
         status: "Completed",
         completed_at: new Date(),
-        notes_url, // could be a Supabase Storage file URL or other upload
+        notes_url: notes_url || null,
+        final_text: content_text || null, // admin-written text
       })
       .eq("id", id);
 
-    if (updateError) throw updateError;
+    if (error) throw error;
 
-    // ✅ Optionally log completion message in feedback/messages
-    if (message) {
-      await supabase.from("writing_feedback").insert([
-        {
-          user_id: order.user_id,
-          order_id: id,
-          writer_name: "Admin",
-          message,
-        },
-      ]);
-    }
-
-    // ✅ Notify user about completion
+    // Notify User
     await supabase.from("user_notifications").insert([
       {
         user_id: order.user_id,
         title: "Order Completed",
-        message: `Your requested notes or assessment (#${id}) is now ready. Please check your dashboard to download it.`,
+        message: `Your writing order (#${id}) is now ready. Download or read it.`,
         created_at: new Date(),
-        is_read: false,
       },
     ]);
 
-    res.json({ message: "Order marked as completed and user notified!" });
+    res.json({ message: "Order completed and delivered to user." });
   } catch (err) {
-    console.error("Complete order error:", err.message);
-    res.status(500).json({ error: "Error completing order" });
+    res.status(500).json({ error: err.message });
   }
 };
 
-/* ✅ Reject order (if invalid or unclear) */
+/* ===============================
+   ADMIN REJECTS ORDER
+=============================== */
 export const rejectOrder = async (req, res) => {
   try {
-    const adminId = req.user.id;
     const { id } = req.params;
     const { reason } = req.body;
 
-    const { data: order, error: fetchError } = await supabase
+    const { data: order } = await supabase
       .from("writing_orders")
-      .select("id, user_id")
+      .select("user_id")
       .eq("id", id)
       .single();
 
-    if (fetchError || !order)
-      return res.status(404).json({ error: "Order not found" });
+    if (!order) return res.status(404).json({ error: "Order not found" });
 
-    // Update status
-    const { error: updateError } = await supabase
+    // Reject order
+    await supabase
       .from("writing_orders")
       .update({
         status: "Rejected",
@@ -158,24 +147,69 @@ export const rejectOrder = async (req, res) => {
       })
       .eq("id", id);
 
-    if (updateError) throw updateError;
-
     // Notify user
     await supabase.from("user_notifications").insert([
       {
         user_id: order.user_id,
         title: "Order Rejected",
-        message: `Your writing request (#${id}) was rejected by admin. Reason: ${
-          reason || "Not specified"
-        }.`,
+        message: `Your writing order #${id} was rejected. Reason: ${reason}`,
         created_at: new Date(),
-        is_read: false,
       },
     ]);
 
-    res.json({ message: "Order rejected and user notified" });
+    res.json({ message: "Order rejected and user notified." });
   } catch (err) {
-    console.error("Reject order error:", err.message);
-    res.status(500).json({ error: "Error rejecting order" });
+    res.status(500).json({ error: err.message });
   }
 };
+
+/* ===============================
+   ADMIN FILE UPLOAD CONTROLLER
+=============================== */
+import multer from "multer";
+const upload = multer({ storage: multer.memoryStorage() }).single("file");
+
+export const uploadWritingFile = async (req, res) => {
+  upload(req, res, async (err) => {
+    try {
+      if (err) {
+        console.error("Multer error:", err);
+        return res.status(400).json({ error: "File upload failed" });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ error: "No file provided" });
+      }
+
+      const file = req.file;
+      const fileName = `${Date.now()}-${file.originalname}`;
+
+      // Upload to Supabase Storage
+      const { error: uploadError } = await supabase.storage
+        .from("writing_uploads") // make sure this bucket exists
+        .upload(fileName, file.buffer, {
+          contentType: file.mimetype,
+          upsert: false,
+        });
+
+      if (uploadError) {
+        console.error("Supabase upload error:", uploadError.message);
+        return res.status(500).json({ error: "Supabase upload failed" });
+      }
+
+      // Generate public URL
+      const { data: publicUrl } = supabase.storage
+        .from("writing_uploads")
+        .getPublicUrl(fileName);
+
+      res.json({
+        message: "File uploaded successfully",
+        url: publicUrl.publicUrl,
+      });
+    } catch (error) {
+      console.error("Upload controller error:", error.message);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+};
+

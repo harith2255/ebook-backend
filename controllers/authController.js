@@ -1,4 +1,5 @@
 import supabase from "../utils/supabaseClient.js";
+import { logActivity } from "../utils/activityLogger.js";
 
 /* =====================================================
    🧩 REGISTER NEW USER
@@ -71,6 +72,12 @@ export async function register(req, res) {
 /* =====================================================
    🧠 LOGIN USER
 ===================================================== */
+/* =====================================================
+   🧠 LOGIN USER
+===================================================== */
+/* =====================================================
+   🧠 LOGIN USER
+===================================================== */
 export async function login(req, res) {
   try {
     const { email, password } = req.body;
@@ -79,9 +86,7 @@ export async function login(req, res) {
       return res.status(400).json({ error: "Email and password required" });
     }
 
-    /* --------------------------------------------------
-       1️⃣ Authenticate with Supabase
-    -------------------------------------------------- */
+    // 1️⃣ Authenticate with Supabase
     const { data: loginData, error: loginError } =
       await supabase.auth.signInWithPassword({
         email,
@@ -95,26 +100,17 @@ export async function login(req, res) {
     const accessToken = loginData.session?.access_token;
     const userId = loginData.user.id;
 
-    /* --------------------------------------------------
-       2️⃣ Fetch role from PROFILES table
-    -------------------------------------------------- */
+    // 2️⃣ Fetch role
     let role = "User";
-
-    const { data: profile, error: profileErr } = await supabase
+    const { data: profile } = await supabase
       .from("profiles")
       .select("role")
       .eq("id", userId)
       .single();
 
-    if (profileErr) {
-      console.error("Profile lookup error:", profileErr);
-    }
-
     if (profile?.role) role = profile.role;
 
-    /* --------------------------------------------------
-       3️⃣ Super Admin Override
-    -------------------------------------------------- */
+    // 3️⃣ Super Admin override
     if (email === process.env.SUPER_ADMIN_EMAIL) {
       role = "super_admin";
       await supabase.from("profiles").upsert([
@@ -122,6 +118,19 @@ export async function login(req, res) {
       ]);
     }
 
+    /* --------------------------------------------------
+       📝 4️⃣ Log Activity
+    -------------------------------------------------- */
+    await logActivity(
+      userId,
+      loginData.user.user_metadata.full_name,
+      "logged in",
+      "login"
+    );
+
+    /* --------------------------------------------------
+       ✅ 5️⃣ RETURN SUCCESS RESPONSE (missing before)
+    -------------------------------------------------- */
     return res.status(200).json({
       message: "Login successful",
       user: {
@@ -137,6 +146,8 @@ export async function login(req, res) {
     return res.status(500).json({ error: "Internal Server Error" });
   }
 }
+
+
 
 /* =====================================================
    🚪 LOGOUT USER

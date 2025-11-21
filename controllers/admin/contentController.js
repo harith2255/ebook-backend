@@ -1,5 +1,6 @@
 // controllers/admin/contentController.js
-import supabase from "../../utils/supabaseClient.js"; // default admin client (service role)
+import { supabaseAdmin as supabase } from "../../utils/supabaseClient.js";
+ // default admin client (service role)
 import getPdfPageCount from "../../utils/pdfReader.js"; // your latin1-based page counter
 // If you're using multer for file uploads, req.file.buffer is expected
 

@@ -1,6 +1,8 @@
 import supabase from "../utils/supabaseClient.js";
 
-// ✅ Get all available services
+/* =====================================================
+   GET ALL WRITING SERVICES
+===================================================== */
 export const getServices = async (req, res) => {
   const { data, error } = await supabase
     .from("writing_services")
@@ -11,10 +13,14 @@ export const getServices = async (req, res) => {
   res.json(data);
 };
 
-// ✅ Place a new order
+/* =====================================================
+   PLACE A NEW ORDER — NO safeDate, uses raw deadline
+===================================================== */
 export const placeOrder = async (req, res) => {
   try {
     const userId = req.user.id;
+    const userName = req.user.user_metadata?.full_name || req.user.email;
+
     const {
       title,
       type,
@@ -30,12 +36,13 @@ export const placeOrder = async (req, res) => {
       .insert([
         {
           user_id: userId,
+          user_name: userName,
           title,
           type,
           subject_area,
           academic_level,
           pages,
-          deadline,
+          deadline,      // <-- RAW VALUE, NO safeDate
           total_price,
           status: "Pending",
         },
@@ -45,14 +52,18 @@ export const placeOrder = async (req, res) => {
     if (error) throw error;
 
     res.json({ message: "Order placed successfully!", order: data[0] });
+
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
-// ✅ Get active orders
+/* =====================================================
+   GET ACTIVE ORDERS
+===================================================== */
 export const getActiveOrders = async (req, res) => {
   const userId = req.user.id;
+
   const { data, error } = await supabase
     .from("writing_orders")
     .select("*")
@@ -63,9 +74,12 @@ export const getActiveOrders = async (req, res) => {
   res.json(data);
 };
 
-// ✅ Get completed orders
+/* =====================================================
+   GET COMPLETED ORDERS
+===================================================== */
 export const getCompletedOrders = async (req, res) => {
   const userId = req.user.id;
+
   const { data, error } = await supabase
     .from("writing_orders")
     .select("*")
@@ -76,92 +90,97 @@ export const getCompletedOrders = async (req, res) => {
   res.json(data);
 };
 
-
-
-/**
- * ✅ Update order and notify assigned author
- */
-export const updateOrder = async (req, res) => {
+/* =====================================================
+   GET ORDER BY ID (User can view final_text + files)
+===================================================== */
+export const getOrderById = async (req, res) => {
   try {
     const userId = req.user.id;
     const { id } = req.params;
+
+    const { data, error } = await supabase
+      .from("writing_orders")
+      .select("*")
+      .eq("id", id)
+      .eq("user_id", userId)
+      .single();
+
+    if (error) throw error;
+
+    res.json(data);
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/* =====================================================
+   UPDATE ORDER (edit deadline + notes)
+===================================================== */
+export const updateOrder = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const updatedBy = req.user.user_metadata?.full_name || req.user.email;
+
+    const { id } = req.params;
     const { deadline, additional_notes } = req.body;
 
-    // ✅ Fetch the order first to verify ownership and get author_id
-    const { data: order, error: fetchError } = await supabase
+    const { data: order, error } = await supabase
       .from("writing_orders")
-      .select("id, user_id, author_id, deadline")
+      .select("id, user_id, author_id")
       .eq("id", id)
       .single();
 
-    if (fetchError || !order)
+    if (error || !order)
       return res.status(404).json({ error: "Order not found" });
 
     if (order.user_id !== userId)
-      return res.status(403).json({ error: "Unauthorized: Not your order" });
+      return res.status(403).json({ error: "Unauthorized" });
 
-    // ✅ Update order details
-    const { error: updateError } = await supabase
+    await supabase
       .from("writing_orders")
       .update({
-        deadline,
+        deadline,     // <-- RAW VALUE
         additional_notes,
+        updated_by: updatedBy,
         updated_at: new Date(),
       })
       .eq("id", id);
 
-    if (updateError)
-      return res.status(400).json({ error: updateError.message });
+    // notify writer
+    await supabase.from("user_notifications").insert([
+      {
+        user_id: order.author_id,
+        title: "Order Updated",
+        message: `Order #${id} updated by ${updatedBy}.`,
+        created_at: new Date(),
+      },
+    ]);
 
-    // ✅ Send notification to the author
-    const notificationTitle = "Order Updated";
-    const notificationMessage = `The order #${id} has been updated by the client. 
-New deadline: ${deadline || "unchanged"}.`;
+    res.json({ message: "Order updated & writer notified" });
 
-    const { error: notifyError } = await supabase
-      .from("user_notifications")
-      .insert([
-        {
-          user_id: order.author_id,
-          title: notificationTitle,
-          message: notificationMessage,
-          created_at: new Date(),
-          is_read: false,
-        },
-      ]);
-
-    if (notifyError)
-      console.error("Notification error:", notifyError.message);
-
-    // ✅ (Optional) You can also send a direct chat message if you have a chat table
-    // await supabase.from("messages").insert([
-    //   {
-    //     sender_id: userId,
-    //     receiver_id: order.author_id,
-    //     content: `Your assigned order (#${id}) has been updated.`,
-    //     created_at: new Date(),
-    //   },
-    // ]);
-
-    res.json({ message: "Order updated and author notified" });
   } catch (err) {
-    console.error("Order update error:", err.message);
     res.status(500).json({ error: "Server error updating order" });
   }
 };
 
-
-// ✅ Send feedback / message to writer
+/* =====================================================
+   SEND FEEDBACK / MESSAGE
+===================================================== */
 export const sendFeedback = async (req, res) => {
   const userId = req.user.id;
+  const userName = req.user.user_metadata?.full_name || req.user.email;
+
   const { order_id, writer_name, message } = req.body;
 
   const { error } = await supabase.from("writing_feedback").insert([
     {
       user_id: userId,
+      user_name: userName,
       order_id,
       writer_name,
       message,
+      created_at: new Date(),
     },
   ]);
 
@@ -169,47 +188,18 @@ export const sendFeedback = async (req, res) => {
   res.json({ message: "Feedback sent successfully" });
 };
 
-// ✅ Get messages for an order
+/* =====================================================
+   GET FEEDBACK FOR ORDER
+===================================================== */
 export const getFeedbackForOrder = async (req, res) => {
   const { order_id } = req.params;
 
   const { data, error } = await supabase
     .from("writing_feedback")
-    .select("*")
+    .select("id, message, writer_name, user_name, created_at")
     .eq("order_id", order_id)
     .order("created_at", { ascending: true });
 
   if (error) return res.status(400).json({ error: error.message });
   res.json(data);
-};
-export const updateOrderStatus = async (req, res) => {
-  const { id } = req.params;
-  const { status } = req.body;
-
-  const allowed = ["Pending", "In Progress", "Draft Review", "Completed"];
-
-  if (!allowed.includes(status)) {
-    return res.status(400).json({ error: "Invalid status" });
-  }
-
-  const { error } = await supabase
-    .from("writing_orders")
-    .update({ status })
-    .eq("id", id);
-
-  if (error) return res.status(400).json({ error: error.message });
-
-  res.json({ message: "Status updated successfully" });
-};
-export const assignWriter = async (req, res) => {
-  const { order_id, author_id } = req.body;
-
-  const { error } = await supabase
-    .from("writing_orders")
-    .update({ author_id })
-    .eq("id", order_id);
-
-  if (error) return res.status(400).json({ error: error.message });
-
-  res.json({ message: "Writer assigned" });
 };

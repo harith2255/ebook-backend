@@ -37,26 +37,36 @@ export async function verifySupabaseAuth(req, res, next) {
   }
 }
 
+
+
 /**
- * ✅ Middleware: Restrict route to Admin users only
+ * ADMIN ONLY access
+ * Works only if:
+ *   1. User email matches SUPER_ADMIN_EMAIL
+ *   2. OR user has metadata { role: 'admin' }
  */
 export async function adminOnly(req, res, next) {
   try {
-    if (!req.user)
+    if (!req.user) {
       return res.status(401).json({ error: "Unauthorized: No user attached" });
-
-    const supabaseRole = req.user.app_metadata?.role;
-    const appRole = req.user.role;
-
-    if (
-      req.user.email === process.env.SUPER_ADMIN_EMAIL ||
-      supabaseRole === "admin" ||
-      appRole === "admin"
-    ) {
-      return next(); // ✅ Authorized
     }
 
-    return res.status(403).json({ error: "Access denied: Admins only" });
+    const email = req.user.email?.toLowerCase();
+    const adminEmail = process.env.SUPER_ADMIN_EMAIL?.toLowerCase();
+
+    const metaRole = req.user.app_metadata?.role; // set manually in Supabase
+    const userMetaRole = req.user.user_metadata?.role; // optional
+
+    const isAdmin =
+      email === adminEmail ||
+      metaRole === "admin" ||
+      userMetaRole === "admin";
+
+    if (!isAdmin) {
+      return res.status(403).json({ error: "Access denied: Admins only" });
+    }
+
+    return next();
   } catch (err) {
     console.error("Admin check error:", err.message);
     res.status(500).json({ error: "Internal server error" });

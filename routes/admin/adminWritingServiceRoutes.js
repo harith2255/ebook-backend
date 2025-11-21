@@ -10,10 +10,24 @@ import { verifySupabaseAuth, adminOnly } from "../../middleware/authMiddleware.j
 
 const router = express.Router();
 
-router.get("/orders", adminOnly,verifySupabaseAuth, getAllOrders);
-router.get("/orders/pending", adminOnly,verifySupabaseAuth, getPendingOrders);
-router.put("/orders/:id/accept", adminOnly,verifySupabaseAuth, acceptOrder);
-router.put("/orders/:id/complete", adminOnly,verifySupabaseAuth ,completeOrder);
-router.put("/orders/:id/reject", adminOnly,verifySupabaseAuth, rejectOrder);
+// Always: verifySupabaseAuth → adminOnly → controller
+router.get("/orders", verifySupabaseAuth, adminOnly, getAllOrders);
+router.get("/orders/pending", verifySupabaseAuth, adminOnly, getPendingOrders);
+router.put("/orders/:id/accept", verifySupabaseAuth, adminOnly, acceptOrder);
+router.put("/orders/:id/complete", verifySupabaseAuth, adminOnly, completeOrder);
+router.put("/orders/:id/reject", verifySupabaseAuth, adminOnly, rejectOrder);
+
+
+import { uploadWritingFile } from "../../controllers/admin/adminWritingServiceController.js";
+import multer from "multer";
+
+router.post(
+  "/upload",
+  verifySupabaseAuth,
+  adminOnly,
+  uploadWritingFile
+);
+
+
 
 export default router;
