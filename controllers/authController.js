@@ -14,9 +14,7 @@ export async function register(req, res) {
 
     const full_name = `${first_name} ${last_name}`;
 
-    /* --------------------------------------------------
-       1️⃣ Create user in Supabase Auth
-    -------------------------------------------------- */
+    // 1️⃣ Create user in Supabase Auth
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password,
@@ -31,9 +29,7 @@ export async function register(req, res) {
 
     const userId = authData.user.id;
 
-    /* --------------------------------------------------
-       2️⃣ Insert into PROFILES table
-    -------------------------------------------------- */
+    // 2️⃣ Insert into PROFILES table
     const { error: insertError } = await supabase.from("profiles").insert({
       id: userId,
       email,
@@ -50,6 +46,14 @@ export async function register(req, res) {
       console.error("Profile insert error:", insertError);
       return res.status(500).json({ error: "Failed to save user profile" });
     }
+
+    // 3️⃣ 🔥 Log Activity (registration)
+    await logActivity(
+      userId,
+      full_name,
+      "created an account",
+      "activity"
+    );
 
     return res.status(201).json({
       message: "Account created successfully",
@@ -69,12 +73,6 @@ export async function register(req, res) {
   }
 }
 
-/* =====================================================
-   🧠 LOGIN USER
-===================================================== */
-/* =====================================================
-   🧠 LOGIN USER
-===================================================== */
 /* =====================================================
    🧠 LOGIN USER
 ===================================================== */
@@ -118,9 +116,7 @@ export async function login(req, res) {
       ]);
     }
 
-    /* --------------------------------------------------
-       📝 4️⃣ Log Activity
-    -------------------------------------------------- */
+    // 4️⃣ 🔥 Log Activity (login)
     await logActivity(
       userId,
       loginData.user.user_metadata.full_name,
@@ -128,9 +124,7 @@ export async function login(req, res) {
       "login"
     );
 
-    /* --------------------------------------------------
-       ✅ 5️⃣ RETURN SUCCESS RESPONSE (missing before)
-    -------------------------------------------------- */
+    // 5️⃣ Send response
     return res.status(200).json({
       message: "Login successful",
       user: {
@@ -147,15 +141,24 @@ export async function login(req, res) {
   }
 }
 
-
-
 /* =====================================================
    🚪 LOGOUT USER
 ===================================================== */
 export async function logout(req, res) {
   try {
+    const { user } = req; // (optional) if using auth middleware for request.user
+
     const { error } = await supabase.auth.signOut();
     if (error) return res.status(400).json({ error: error.message });
+
+    // 🔥 Log Activity (logout) — optional
+    if (user)
+      await logActivity(
+        user.id,
+        user.full_name || "Unknown User",
+        "logged out",
+        "login"
+      );
 
     return res.status(200).json({ message: "Logged out successfully" });
 
