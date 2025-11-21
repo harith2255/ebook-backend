@@ -7,6 +7,7 @@ import {
   updateOrder,
   sendFeedback,
   getFeedbackForOrder,
+  uploadUserAttachment
 
 } from "../controllers/writingController.js";
 
@@ -27,6 +28,7 @@ router.get("/orders/completed", getCompletedOrders);
 router.put("/orders/:id", updateOrder);
 router.post("/feedback", sendFeedback);
 router.get("/feedback/:order_id", getFeedbackForOrder);
+router.post("/upload", uploadUserAttachment);
 
 
 export default router;

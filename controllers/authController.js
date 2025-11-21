@@ -39,7 +39,6 @@ export async function register(req, res) {
       role: "User",
       status: "active",
       plan: "free",
-      created_at: new Date().toISOString(),
     });
 
     if (insertError) {
@@ -47,13 +46,8 @@ export async function register(req, res) {
       return res.status(500).json({ error: "Failed to save user profile" });
     }
 
-    // 3️⃣ 🔥 Log Activity (registration)
-    await logActivity(
-      userId,
-      full_name,
-      "created an account",
-      "activity"
-    );
+    // 3️⃣ Log activity (normal users only — register always creates Users)
+    await logActivity(userId, full_name, "created an account", "activity");
 
     return res.status(201).json({
       message: "Account created successfully",
@@ -84,53 +78,51 @@ export async function login(req, res) {
       return res.status(400).json({ error: "Email and password required" });
     }
 
-    // 1️⃣ Authenticate with Supabase
+    // 1️⃣ Authenticate
     const { data: loginData, error: loginError } =
-      await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      await supabase.auth.signInWithPassword({ email, password });
 
     if (loginError) {
       return res.status(400).json({ error: loginError.message });
     }
 
-    const accessToken = loginData.session?.access_token;
     const userId = loginData.user.id;
+    const accessToken = loginData.session?.access_token;
 
-    // 2️⃣ Fetch role
-    let role = "User";
+    // 2️⃣ Fetch profile
     const { data: profile } = await supabase
       .from("profiles")
-      .select("role")
+      .select("full_name, first_name, last_name, role, email")
       .eq("id", userId)
       .single();
 
-    if (profile?.role) role = profile.role;
+    let role = profile?.role || "User";
 
-    // 3️⃣ Super Admin override
+    // 3️⃣ Super admin override
     if (email === process.env.SUPER_ADMIN_EMAIL) {
       role = "super_admin";
-      await supabase.from("profiles").upsert([
-        { id: userId, email, role }
-      ]);
+      await supabase.from("profiles").upsert([{ id: userId, email, role }]);
     }
 
-    // 4️⃣ 🔥 Log Activity (login)
-    await logActivity(
-      userId,
-      loginData.user.user_metadata.full_name,
-      "logged in",
-      "login"
-    );
+    // 4️⃣ Full Name generation
+    const userFullName =
+      profile?.full_name ||
+      `${profile?.first_name || ""} ${profile?.last_name || ""}`.trim() ||
+      email;
 
-    // 5️⃣ Send response
+    // 5️⃣ Log activity ONLY for normal users
+    if (role !== "admin" && role !== "super_admin") {
+      await logActivity(userId, userFullName, "logged in", "login");
+    }
+
+    // 6️⃣ Return success
     return res.status(200).json({
       message: "Login successful",
       user: {
         id: userId,
         email,
         role,
+        full_name: userFullName,
       },
       access_token: accessToken,
     });
@@ -146,19 +138,20 @@ export async function login(req, res) {
 ===================================================== */
 export async function logout(req, res) {
   try {
-    const { user } = req; // (optional) if using auth middleware for request.user
+    const { user } = req;
 
     const { error } = await supabase.auth.signOut();
     if (error) return res.status(400).json({ error: error.message });
 
-    // 🔥 Log Activity (logout) — optional
-    if (user)
+    // 1️⃣ Log logout only for normal users
+    if (user && user.role !== "admin" && user.role !== "super_admin") {
       await logActivity(
         user.id,
-        user.full_name || "Unknown User",
+        user.full_name || user.email || "Unknown User",
         "logged out",
         "login"
       );
+    }
 
     return res.status(200).json({ message: "Logged out successfully" });
 

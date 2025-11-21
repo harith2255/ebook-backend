@@ -93,27 +93,73 @@ export const getReports = async (req, res) => {
 /* -------------------------------------------------------
    3. Generate CSV Report and Upload to Storage
 ------------------------------------------------------- */
+/* -------------------------------------------------------
+   3. Generate Analytics CSV (Revenue + Users + Books)
+------------------------------------------------------- */
 export const generateReport = async (req, res) => {
   try {
-    // Fetch subscription table
-    const { data: subscription, error: subErr } =
-      await supabase.from("subscriptions").select("*");
+    const MONTHS = [
+      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    ];
+
+    /* ---------------- Revenue (subscriptions) ---------------- */
+    const { data: subscriptions, error: subErr } = await supabase
+      .from("subscriptions")
+      .select("amount, created_at");
 
     if (subErr) return res.status(400).json({ error: subErr.message });
 
-    /* ---------------- CSV Builder ---------------- */
-    const csvHeader = "user_id,plan,amount,status,start_date,end_date\n";
+    /* ---------------- Books Sold ---------------- */
+    const { data: bookSales, error: bookErr } = await supabase
+      .from("book_sales")
+      .select("created_at");
 
-    const csvRows = subscription.map(s =>
-      `${s.user_id},${s.plan},${s.amount},${s.status},${s.start_date},${s.end_date}`
+    if (bookErr) return res.status(400).json({ error: bookErr.message });
+
+    /* ---------------- Users (auth) ---------------- */
+    const { data: authUsers, error: userErr } =
+      await supabase.auth.admin.listUsers();
+
+    if (userErr) return res.status(400).json({ error: userErr.message });
+
+    const allUsers = authUsers?.users || [];
+
+
+    /* -------------------------------------------------------
+       Build Analytics for ALL 12 months
+    ------------------------------------------------------- */
+    const analytics = MONTHS.map((m, i) => {
+      const revenue = subscriptions
+        ?.filter(s => new Date(s.created_at).getMonth() === i)
+        .reduce((sum, row) => sum + Number(row.amount), 0);
+
+      const users = allUsers
+        ?.filter(u => new Date(u.created_at).getMonth() === i).length;
+
+      const books = bookSales
+        ?.filter(b => new Date(b.created_at).getMonth() === i).length;
+
+      return { month: m, revenue, users, books };
+    });
+
+
+    /* -------------------------------------------------------
+       Convert to CSV
+    ------------------------------------------------------- */
+    const csvHeader = "month,revenue,users,books\n";
+    const csvRows = analytics.map(a =>
+      `${a.month},${a.revenue},${a.users},${a.books}`
     );
 
     const csv = csvHeader + csvRows.join("\n");
 
-    // File name
-    const fileName = `report-${Date.now()}.csv`;
 
-    // Upload to bucket
+    /* -------------------------------------------------------
+       Upload CSV to Supabase Storage
+    ------------------------------------------------------- */
+    const fileName = `analytics-${Date.now()}.csv`;
+
     const { error: uploadErr } = await supabase.storage
       .from("reports")
       .upload(fileName, csv, {
@@ -123,23 +169,29 @@ export const generateReport = async (req, res) => {
 
     if (uploadErr) return res.status(400).json({ error: uploadErr.message });
 
-    // Get public URL
     const { data: urlData } = supabase.storage
       .from("reports")
       .getPublicUrl(fileName);
 
-    // Save metadata inside "reports" table
+
+    /* -------------------------------------------------------
+       Save metadata in "reports" table
+    ------------------------------------------------------- */
     await supabase.from("reports").insert([
       {
-        name: "Subscription Revenue Report",
-        description: "Auto-generated CSV report of subscription payments",
+        name: "Platform Analytics Report",
+        description: "Revenue, user growth, and books sold (12 months)",
         format: "CSV",
-        file_url: urlData.publicUrl,
+        file_url: urlData.publicUrl
       }
     ]);
 
+
+    /* -------------------------------------------------------
+       Response
+    ------------------------------------------------------- */
     res.json({
-      message: "Report generated successfully",
+      message: "Analytics report generated successfully",
       url: urlData.publicUrl,
     });
 
@@ -148,6 +200,7 @@ export const generateReport = async (req, res) => {
     res.status(500).json({ error: "Failed to generate report" });
   }
 };
+
 
 
 /* -------------------------------------------------------

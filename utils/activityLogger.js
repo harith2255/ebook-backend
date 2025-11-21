@@ -1,21 +1,36 @@
 import supabase from "./supabaseClient.js";
 
-/**
- * Log platform activity
- * @param {string} userId - Supabase Auth user ID
- * @param {string} userName - Full name of the user
- * @param {string} action - Human-readable action text
- * @param {string} type - One of: login, subscription, purchase, content, activity
- */
 export async function logActivity(userId, userName, action, type = "activity") {
   try {
+    let finalName = userName;
+
+    // Always fetch name from profiles table
+    if (userId) {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("full_name, first_name, last_name, email")
+        .eq("id", userId)
+        .single();
+
+      if (profile) {
+        finalName =
+          profile.full_name ||
+          `${profile.first_name || ""} ${profile.last_name || ""}`.trim() ||
+          profile.email ||
+          finalName;
+      }
+    }
+
+    finalName = finalName || "Unknown User";
+
+    // Let DB auto-generate timestamp
     await supabase.from("activity_log").insert({
-      user_id: userId || null,
-      user_name: userName || "Unknown User",
-      action,
+      user_id: userId,
+      user_name: finalName,
+      action: action || "performed an action",
       type,
-      created_at: new Date().toISOString(),
     });
+
   } catch (error) {
     console.error("❌ Failed to log activity:", error.message);
   }

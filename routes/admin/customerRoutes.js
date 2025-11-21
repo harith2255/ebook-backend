@@ -5,10 +5,10 @@ import {
   listCustomers,
   suspendCustomer,
   activateCustomer,
-  sendEmailToCustomer,
   getSubscriptionHistory,
   addSubscription,
-  deleteCustomer
+  deleteCustomer,
+  sendNotificationToCustomer
 } from "../../controllers/admin/customerController.js";
 
 const router = express.Router();
@@ -18,7 +18,7 @@ router.use(verifySupabaseAuth, adminOnly);
 router.get("/", listCustomers);
 router.post("/:id/suspend", suspendCustomer);
 router.post("/:id/activate", activateCustomer);
-router.post("/:id/email", sendEmailToCustomer);
+router.post("/:id/notify", sendNotificationToCustomer);
 router.get("/:id/subscriptions", getSubscriptionHistory);
 router.post("/:id/subscriptions", addSubscription);
 router.delete("/:id", deleteCustomer); // optional

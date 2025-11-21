@@ -18,13 +18,19 @@ export const uploadContent = async (req, res) => {
     const category = req.body.category || "";
     const description = req.body.description || "";
     const price = req.body.price ? Number(req.body.price) : null;
-    const file = req.file; // optional (Buffer)
 
-    if (!type || !title || !author) {
-      return res.status(400).json({ error: "type, title, and author are required" });
+    const file = req.files?.file?.[0] || null;
+    const cover = req.files?.cover?.[0] || null;
+
+    // ✅ FIXED VALIDATION
+    if (!type || !title) {
+      return res.status(400).json({ error: "type and title are required" });
     }
 
-    // map type -> table & bucket
+    if (type !== "Mock Test" && !author) {
+      return res.status(400).json({ error: "author is required for E-Book and Notes" });
+    }
+
     const table =
       type === "E-Book" ? "ebooks" :
       type === "Notes" ? "notes" :
@@ -32,12 +38,12 @@ export const uploadContent = async (req, res) => {
 
     if (!table) return res.status(400).json({ error: "Invalid content type" });
 
-    // If a file is provided, upload to bucket with same name as table
     let publicUrl = null;
+    let coverUrl = null;
     let pageCount = 0;
 
+    // --- FILE UPLOAD ---
     if (file) {
-      // store file in storage bucket (bucket name same as table)
       const filePath = `${Date.now()}-${file.originalname}`;
 
       const { error: uploadErr } = await supabase.storage
@@ -49,30 +55,51 @@ export const uploadContent = async (req, res) => {
 
       if (uploadErr) {
         console.error("Storage upload error:", uploadErr);
-        return res.status(400).json({ error: uploadErr.message || "Storage upload failed" });
+        return res.status(400).json({ error: uploadErr.message });
       }
 
-      const { data: publicData } = supabase.storage.from(table).getPublicUrl(filePath);
+      const { data: publicData } = supabase.storage
+        .from(table)
+        .getPublicUrl(filePath);
+
       publicUrl = publicData?.publicUrl ?? null;
 
-      // Count pages for PDFs (works for ebooks and notes)
       if (file.mimetype === "application/pdf") {
         try {
           pageCount = getPdfPageCount(file.buffer) || 0;
         } catch (err) {
           console.warn("pdf page count failed:", err);
-          pageCount = 0;
         }
       }
     }
 
-    // Build insert object for each table strictly matching schema
+    // --- COVER IMAGE UPLOAD ---
+    if (cover) {
+      const coverPath = `${Date.now()}-${cover.originalname}`;
 
+      const { error: coverErr } = await supabase.storage
+        .from("covers")
+        .upload(coverPath, cover.buffer, {
+          contentType: cover.mimetype,
+          upsert: false,
+        });
+
+      if (coverErr) {
+        console.error("Cover upload error:", coverErr);
+        return res.status(400).json({ error: coverErr.message });
+      }
+
+      const { data: coverData } = supabase.storage
+        .from("covers")
+        .getPublicUrl(coverPath);
+
+      coverUrl = coverData?.publicUrl || null;
+    }
+
+    // --- BUILD INSERT OBJECT ---
     let insertObj = null;
 
     if (table === "ebooks") {
-      // EBOOKS schema (from you): id(uuid), title, author, category, description, pages(int),
-      // price(numeric), sales(int), status(text), file_url(text), created_at(timestamptz), tags(array), summary(text), embedding(vector)
       insertObj = {
         title,
         author,
@@ -83,14 +110,15 @@ export const uploadContent = async (req, res) => {
         sales: 0,
         status: "Published",
         file_url: publicUrl,
+        cover_url: coverUrl,
         created_at: new Date().toISOString(),
-        tags: [],         // empty array
+        tags: [],
         summary: "",
-        embedding: null,  // null vector
+        embedding: null,
       };
-    } else if (table === "notes") {
-      // NOTES schema (from you): id(bigint), title, category, author, pages, downloads, rating, price,
-      // featured(bool), file_url, preview_content, created_at, updated_at, description, tags, summary, embedding
+    }
+
+    if (table === "notes") {
       insertObj = {
         title,
         category: category || null,
@@ -101,6 +129,7 @@ export const uploadContent = async (req, res) => {
         price: price !== null ? price : 0,
         featured: false,
         file_url: publicUrl,
+        cover_url: coverUrl,
         preview_content: "",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -109,33 +138,23 @@ export const uploadContent = async (req, res) => {
         summary: "",
         embedding: null,
       };
-    } else if (table === "mock_tests") {
-      // MOCK_TESTS schema you provided:
-      // id(bigint), title(text), scheduled_date(timestamptz), total_questions(int),
-      // duration_minutes(int), created_at(timestamp), subject(text), difficulty(text), participants(int)
-      //
-      // NOTE: your mock_tests schema does not include file_url. We will not attempt to insert file_url to avoid column errors.
-      // If you'd like to store uploaded file URL, add a `file_url text` column to mock_tests (SQL shown below).
-      const scheduled_date = req.body.scheduled_date ? new Date(req.body.scheduled_date).toISOString() : new Date().toISOString();
-      const total_questions = req.body.total_questions ? Number(req.body.total_questions) : 0;
-      const duration_minutes = req.body.duration_minutes ? Number(req.body.duration_minutes) : 0;
-      const difficulty = req.body.difficulty || "Medium";
-      const subject = req.body.subject || category || "Agriculture";
+    }
 
+    if (table === "mock_tests") {
       insertObj = {
         title,
-        scheduled_date,
-        total_questions,
-        duration_minutes,
+        scheduled_date: req.body.scheduled_date
+          ? new Date(req.body.scheduled_date).toISOString()
+          : new Date().toISOString(),
+        total_questions: Number(req.body.total_questions || 0),
+        duration_minutes: Number(req.body.duration_minutes || 0),
         created_at: new Date().toISOString(),
-        subject,
-        difficulty,
+        subject: req.body.subject || category || "General",
+        difficulty: req.body.difficulty || "Medium",
         participants: 0,
-        // intentionally NOT inserting file_url because schema doesn't have it
       };
     }
 
-    // Perform insert (we use the service-role client so RLS won't block the insert)
     const { data, error } = await supabase
       .from(table)
       .insert([insertObj])
@@ -144,8 +163,7 @@ export const uploadContent = async (req, res) => {
 
     if (error) {
       console.error("Insert error:", error);
-      // pass error message from supabase where possible
-      return res.status(400).json({ error: error.message || "Insert failed" });
+      return res.status(400).json({ error: error.message });
     }
 
     return res.status(201).json({ message: "Content uploaded", data });
@@ -155,6 +173,7 @@ export const uploadContent = async (req, res) => {
     return res.status(500).json({ error: "Server error uploading content" });
   }
 };
+
 
 /**
  * listContent
@@ -173,6 +192,19 @@ export const listContent = async (req, res) => {
 
     if (!table) return res.status(400).json({ error: "Invalid type" });
 
+    // For mock tests → include attempts count
+    if (table === "mock_tests") {
+      const { data, error } = await supabase
+        .from("mock_tests")
+        .select("*, attempts:mock_attempts(count)")
+        .order("created_at", { ascending: false });
+
+      if (error) return res.status(400).json({ error: error.message });
+
+      return res.json({ contents: data });
+    }
+
+    // For books and notes → normal fetch
     const { data, error } = await supabase
       .from(table)
       .select("*")
@@ -188,7 +220,6 @@ export const listContent = async (req, res) => {
   }
 };
 
-
 /**
  * deleteContent
  * DELETE /api/admin/content/:type/:id
@@ -199,12 +230,33 @@ export const deleteContent = async (req, res) => {
     const { type, id } = req.params;
 
     const table =
-      type === "book" ? "ebooks" :
+      type === "book" || type === "ebook" ? "ebooks" :
       type === "note" ? "notes" :
       type === "test" ? "mock_tests" : null;
 
     if (!table) return res.status(400).json({ error: "Invalid type" });
 
+    // Prevent deleting mock_tests with existing attempts
+    if (table === "mock_tests") {
+      const { data: attempts, error: attemptErr } = await supabase
+        .from("mock_attempts")
+        .select("id")
+        .eq("test_id", id)
+        .limit(1);
+
+      if (attemptErr) {
+        console.error("Check attempts error:", attemptErr);
+        return res.status(400).json({ error: "Failed to check attempts" });
+      }
+
+      if (attempts && attempts.length > 0) {
+        return res.status(400).json({
+          error: "Cannot delete this mock test because users have attempted it.",
+        });
+      }
+    }
+
+    // Proceed delete
     const { error } = await supabase.from(table).delete().eq("id", id);
 
     if (error) {
@@ -212,13 +264,14 @@ export const deleteContent = async (req, res) => {
       return res.status(400).json({ error: error.message || "Delete failed" });
     }
 
-    // Optionally remove file from storage? We don't know file path here.
     return res.json({ message: "Content deleted" });
+
   } catch (err) {
     console.error("deleteContent error:", err);
     return res.status(500).json({ error: "Server error deleting content" });
   }
 };
+
 
 /**
  * editContent
@@ -230,7 +283,9 @@ export const editContent = async (req, res) => {
   try {
     const { type, id } = req.params;
     const updates = { ...req.body };
-    const file = req.file;
+
+    const file = req.files?.file?.[0] || null;     // main file
+    const cover = req.files?.cover?.[0] || null;   // NEW cover file
 
     const table =
       type === "book" ? "ebooks" :
@@ -239,54 +294,40 @@ export const editContent = async (req, res) => {
 
     if (!table) return res.status(400).json({ error: "Invalid type" });
 
-    // Normalize tags if present (string -> array)
-    if (updates.tags && typeof updates.tags === "string") {
-      updates.tags = updates.tags.split(",").map((t) => t.trim());
-    }
-
-    // If file is provided, upload but only set file_url for ebooks/notes (mock_tests has no file_url in schema)
     let file_url = null;
+    let cover_url = null;
+
+    // Replace main file
     if (file) {
       const filePath = `${Date.now()}-${file.originalname}`;
-      const { error: uploadErr } = await supabase.storage.from(table).upload(filePath, file.buffer, {
-        contentType: file.mimetype,
-        upsert: false,
-      });
+      const { error } = await supabase.storage
+        .from(table)
+        .upload(filePath, file.buffer, { contentType: file.mimetype });
 
-      if (uploadErr) {
-        console.error("edit file upload error:", uploadErr);
-        return res.status(400).json({ error: uploadErr.message || "Storage upload failed" });
-      }
+      if (error) return res.status(400).json({ error: error.message });
 
-      const { data: publicData } = supabase.storage.from(table).getPublicUrl(filePath);
-      file_url = publicData?.publicUrl ?? null;
-
-      // If PDF, we can recompute pages for ebooks/notes
-      if (file.mimetype === "application/pdf" && (table === "ebooks" || table === "notes")) {
-        try {
-          const pageCount = getPdfPageCount(file.buffer);
-          updates.pages = pageCount || updates.pages;
-        } catch (err) {
-          console.warn("edit pdf page count failed:", err);
-        }
-      }
-    }
-
-    // Only attach file_url when table supports it (ebooks, notes)
-    if (file_url && (table === "ebooks" || table === "notes")) {
+      const { data: urlData } = supabase.storage.from(table).getPublicUrl(filePath);
+      file_url = urlData?.publicUrl;
       updates.file_url = file_url;
     }
 
-    // For safety: remove fields that could cause errors for mock_tests
-    if (table === "mock_tests") {
-      // Allowed columns based on schema: title, scheduled_date, total_questions, duration_minutes, subject, difficulty, participants, created_at
-      const allowed = ["title", "scheduled_date", "total_questions", "duration_minutes", "subject", "difficulty", "participants"];
-      Object.keys(updates).forEach((k) => {
-        if (!allowed.includes(k)) delete updates[k];
-      });
+    // Replace cover image (NEW)
+    if (cover) {
+      const coverPath = `${Date.now()}-${cover.originalname}`;
+      const { error } = await supabase.storage
+        .from("covers")
+        .upload(coverPath, cover.buffer, { contentType: cover.mimetype });
+
+      if (error) return res.status(400).json({ error: error.message });
+
+      const { data: urlData } = supabase.storage
+        .from("covers")
+        .getPublicUrl(coverPath);
+
+      cover_url = urlData?.publicUrl;
+      updates.cover_url = cover_url;
     }
 
-    // Perform update
     const { data, error } = await supabase
       .from(table)
       .update(updates)
@@ -294,12 +335,10 @@ export const editContent = async (req, res) => {
       .select()
       .single();
 
-    if (error) {
-      console.error("editContent supabase error:", error);
-      return res.status(400).json({ error: error.message || "Update failed" });
-    }
+    if (error) return res.status(400).json({ error: error.message });
 
     return res.json({ message: "Content updated", data });
+
   } catch (err) {
     console.error("editContent error:", err);
     return res.status(500).json({ error: "Server error editing content" });

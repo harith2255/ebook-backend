@@ -14,7 +14,7 @@ export const getServices = async (req, res) => {
 };
 
 /* =====================================================
-   PLACE A NEW ORDER — NO safeDate, uses raw deadline
+   PLACE NEW ORDER (with optional attachments_url)
 ===================================================== */
 export const placeOrder = async (req, res) => {
   try {
@@ -29,6 +29,9 @@ export const placeOrder = async (req, res) => {
       pages,
       deadline,
       total_price,
+      instructions,        // ✅ ADD THIS
+      citation_style,      // ✅ ADD THIS
+      attachments_url      // OPTIONAL
     } = req.body;
 
     const { data, error } = await supabase
@@ -42,21 +45,29 @@ export const placeOrder = async (req, res) => {
           subject_area,
           academic_level,
           pages,
-          deadline,      // <-- RAW VALUE, NO safeDate
+          deadline,
+          instructions,       // ✅ SAVE IT
+          citation_style,     // ✅ SAVE IT
+          attachments_url: attachments_url || null,
           total_price,
           status: "Pending",
         },
       ])
-      .select();
+      .select()
+      .single();
 
     if (error) throw error;
 
-    res.json({ message: "Order placed successfully!", order: data[0] });
+    res.json({
+      message: "Order placed successfully!",
+      order: data,
+    });
 
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
+
 
 /* =====================================================
    GET ACTIVE ORDERS
@@ -68,7 +79,7 @@ export const getActiveOrders = async (req, res) => {
     .from("writing_orders")
     .select("*")
     .eq("user_id", userId)
-    .in("status", ["In Progress", "Draft Review"]);
+    .in("status", ["Pending", "In Progress"]);
 
   if (error) return res.status(400).json({ error: error.message });
   res.json(data);
@@ -91,7 +102,7 @@ export const getCompletedOrders = async (req, res) => {
 };
 
 /* =====================================================
-   GET ORDER BY ID (User can view final_text + files)
+   GET ORDER BY ID (user can view final_text + notes_url)
 ===================================================== */
 export const getOrderById = async (req, res) => {
   try {
@@ -100,7 +111,7 @@ export const getOrderById = async (req, res) => {
 
     const { data, error } = await supabase
       .from("writing_orders")
-      .select("*")
+      .select("*, final_text, notes_url")  
       .eq("id", id)
       .eq("user_id", userId)
       .single();
@@ -115,7 +126,7 @@ export const getOrderById = async (req, res) => {
 };
 
 /* =====================================================
-   UPDATE ORDER (edit deadline + notes)
+   UPDATE ORDER (deadline + additional notes)
 ===================================================== */
 export const updateOrder = async (req, res) => {
   try {
@@ -127,7 +138,7 @@ export const updateOrder = async (req, res) => {
 
     const { data: order, error } = await supabase
       .from("writing_orders")
-      .select("id, user_id, author_id")
+      .select("id, user_id, author_id, status")
       .eq("id", id)
       .single();
 
@@ -137,25 +148,30 @@ export const updateOrder = async (req, res) => {
     if (order.user_id !== userId)
       return res.status(403).json({ error: "Unauthorized" });
 
+    if (order.status !== "Pending")
+      return res.status(400).json({ error: "Only pending orders can be edited" });
+
     await supabase
       .from("writing_orders")
       .update({
-        deadline,     // <-- RAW VALUE
+        deadline,
         additional_notes,
         updated_by: updatedBy,
         updated_at: new Date(),
       })
       .eq("id", id);
 
-    // notify writer
-    await supabase.from("user_notifications").insert([
-      {
-        user_id: order.author_id,
-        title: "Order Updated",
-        message: `Order #${id} updated by ${updatedBy}.`,
-        created_at: new Date(),
-      },
-    ]);
+    // Notify writer if one exists
+    if (order.author_id) {
+      await supabase.from("user_notifications").insert([
+        {
+          user_id: order.author_id,
+          title: "Order Updated",
+          message: `Order #${id} updated by ${updatedBy}.`,
+          created_at: new Date(),
+        },
+      ]);
+    }
 
     res.json({ message: "Order updated & writer notified" });
 
@@ -165,7 +181,7 @@ export const updateOrder = async (req, res) => {
 };
 
 /* =====================================================
-   SEND FEEDBACK / MESSAGE
+   SEND MESSAGE / FEEDBACK TO WRITER
 ===================================================== */
 export const sendFeedback = async (req, res) => {
   const userId = req.user.id;
@@ -178,7 +194,7 @@ export const sendFeedback = async (req, res) => {
       user_id: userId,
       user_name: userName,
       order_id,
-      writer_name,
+      writer_name: writer_name || "Writer",
       message,
       created_at: new Date(),
     },
@@ -203,3 +219,54 @@ export const getFeedbackForOrder = async (req, res) => {
   if (error) return res.status(400).json({ error: error.message });
   res.json(data);
 };
+/* ===============================
+   USER FILE UPLOAD (attachments)
+=============================== */
+
+import multer from "multer";
+const upload = multer({ storage: multer.memoryStorage() }).single("file");
+
+export const uploadUserAttachment = (req, res) => {
+  upload(req, res, async (err) => {
+    try {
+      if (err) {
+        console.error("Multer error:", err);
+        return res.status(400).json({ error: "File upload failed" });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ error: "No file provided" });
+      }
+
+      const file = req.file;
+      const fileName = `user-${req.user.id}-${Date.now()}-${file.originalname.replace(/\s+/g, "_")}`;
+
+      // Upload to Supabase Storage
+      const { error: uploadError } = await supabase.storage
+        .from("writing_uploads")
+        .upload(fileName, file.buffer, {
+          contentType: file.mimetype,
+          upsert: false,
+        });
+
+      if (uploadError) {
+        console.error("Supabase upload error:", uploadError);
+        return res.status(500).json({ error: "Supabase upload failed", details: uploadError.message });
+      }
+
+      // Get Public URL
+      const { data: publicUrl } = supabase.storage
+        .from("writing_uploads")
+        .getPublicUrl(fileName);
+
+      return res.json({
+        message: "File uploaded successfully",
+        url: publicUrl.publicUrl
+      });
+    } catch (error) {
+      console.error("uploadUserAttachment error:", error);
+      return res.status(500).json({ error: "Internal Server Error", details: error.message });
+    }
+  });
+};
+

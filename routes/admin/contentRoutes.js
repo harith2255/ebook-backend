@@ -9,24 +9,47 @@ import {
 import { verifySupabaseAuth, adminOnly } from "../../middleware/authMiddleware.js";
 
 const router = express.Router();
-const upload = multer(); // ✅ handle file upload in memory
+const upload = multer();
 
-// Upload & publish
+// UPLOAD EPUB / PDF + COVER
 router.post(
   "/upload",
-  upload.single("file"),  // ⬅ REQUIRED
+  verifySupabaseAuth,   // 🔥 MUST COME FIRST
+  adminOnly,            // 🔥 MUST COME SECOND
+  upload.fields([
+    { name: "file", maxCount: 1 },
+    { name: "cover", maxCount: 1 }
+  ]),
   uploadContent
 );
 
 
-// List content
-router.get("/", verifySupabaseAuth, adminOnly, listContent);
-
-// Delete content
-router.delete("/:type/:id", verifySupabaseAuth, adminOnly, deleteContent);
-// edit
-router.put("/:type/:id",verifySupabaseAuth,adminOnly,upload.single("file"), editContent
+// EDIT CONTENT
+router.put(
+  "/:type/:id",
+  upload.fields([
+    { name: "file", maxCount: 1 },
+    { name: "cover", maxCount: 1 }
+  ]),
+  verifySupabaseAuth,
+  adminOnly,
+  editContent
 );
 
+// DELETE – no multer here ever
+router.delete(
+  "/:type/:id",
+  verifySupabaseAuth,
+  adminOnly,
+  deleteContent
+);
+
+// LIST
+router.get(
+  "/",
+  verifySupabaseAuth,
+  adminOnly,
+  listContent
+);
 
 export default router;

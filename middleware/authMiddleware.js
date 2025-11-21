@@ -8,34 +8,57 @@ dotenv.config();
  */
 // middleware/authMiddleware.js
 
+
+import supabase from "../utils/supabaseClient.js"; // admin client
+
+
 export async function verifySupabaseAuth(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
-    if (!authHeader)
+    if (!authHeader) {
       return res.status(401).json({ error: "Missing Authorization header" });
-
+    }
 
     const token = authHeader.split(" ")[1];
-    if (!token)
+    if (!token) {
       return res.status(401).json({ error: "Invalid token format" });
+    }
 
-    // ✅ Verify Supabase token
+    // 1️⃣ Verify JWT
     const { data, error } = await supabasePublic.auth.getUser(token);
-
     if (error || !data?.user) {
       console.error("❌ Supabase auth failed:", error?.message);
       return res.status(401).json({ error: "Unauthorized: Invalid or expired token" });
     }
 
-    // ✅ Attach user info to request
-    req.user = data.user;
-    console.log("✅ Auth verified for:", data.user.email);
+    const user = data.user;
+
+    // 2️⃣ Check if user is suspended (profiles table)
+    const { data: profile, error: profileErr } = await supabase
+      .from("profiles")
+      .select("status")
+      .eq("id", user.id)
+      .single();
+
+    if (profileErr) {
+      console.error("❌ Profile lookup error:", profileErr.message);
+      return res.status(500).json({ error: "Failed to verify user status" });
+    }
+
+    if (profile?.status === "Suspended") {
+      return res.status(403).json({ error: "Your account is suspended" });
+    }
+
+    // 3️⃣ Attach user info
+    req.user = user;
+
     next();
   } catch (err) {
     console.error("Auth middleware error:", err.message);
     res.status(500).json({ error: "Internal server error" });
   }
 }
+
 
 
 

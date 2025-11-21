@@ -48,87 +48,103 @@ export const listCustomers = async (req, res) => {
 export const suspendCustomer = async (req, res) => {
   try {
     const { id } = req.params;
-    const { error } = await supabase
+    console.log("⚠️ Suspend request for:", id);
+
+    // 1. Update profiles table
+    const { error: profileError } = await supabase
       .from("profiles")
       .update({ status: "Suspended" })
       .eq("id", id);
 
-    if (error) return res.status(400).json({ error: error.message });
+    if (profileError)
+      return res.status(400).json({ error: profileError.message });
 
-    res.json({ message: "Customer suspended" });
+    // 2. Auth: Set permanent ban
+    const { error: authError } = await supabase.auth.admin.updateUserById(id, {
+      ban_until: new Date("9999-12-31T23:59:59Z").toISOString(),
+    });
+
+    if (authError)
+      return res.status(400).json({ error: authError.message });
+
+    res.json({ message: "Customer suspended successfully" });
   } catch (err) {
     console.error("suspendCustomer error:", err);
     res.status(500).json({ error: "Server error suspending customer" });
   }
 };
 
+
+
 export const activateCustomer = async (req, res) => {
   try {
     const { id } = req.params;
-    const { error } = await supabase
+
+    // 1. Update profiles table
+    const { error: profileError } = await supabase
       .from("profiles")
       .update({ status: "Active" })
       .eq("id", id);
 
-    if (error) return res.status(400).json({ error: error.message });
+    if (profileError)
+      return res.status(400).json({ error: profileError.message });
 
-    res.json({ message: "Customer activated" });
+    // 2. Remove ban
+    const { error: authError } = await supabase.auth.admin.updateUserById(id, {
+      ban_until: null,
+    });
+
+    if (authError)
+      return res.status(400).json({ error: authError.message });
+
+    res.json({ message: "Customer activated successfully" });
   } catch (err) {
     console.error("activateCustomer error:", err);
     res.status(500).json({ error: "Server error activating customer" });
   }
 };
 
+
+
 /* ---------------------------------------------------------
    EMAIL CUSTOMER
 --------------------------------------------------------- */
-export const sendEmailToCustomer = async (req, res) => {
+export const sendNotificationToCustomer = async (req, res) => {
   try {
     const { id } = req.params;
-    const { subject, text, html } = req.body;
+    const { title, message, link } = req.body;
 
-    if (!subject || (!text && !html)) {
-      return res
-        .status(400)
-        .json({ error: "subject and text or html required" });
+    if (!title || !message) {
+      return res.status(400).json({ error: "title and message required" });
     }
 
-    const { data: userData, error: userErr } =
-      await supabase.auth.admin.getUserById(id);
+    // Force only valid DB columns
+    const payload = {
+      user_id: id,
+      title,
+      message,
+      link: link || "dashboard",
+      is_read: false,  // correct column
+      created_at: new Date().toISOString(),
+    };
 
-    if (userErr) {
-      return res.status(400).json({ error: userErr.message });
+    const { error } = await supabase
+      .from("user_notifications")
+      .insert(payload);
+
+    if (error) {
+      console.error("Supabase Insert Error:", error);
+      return res.status(400).json({ error: error.message });
     }
 
-    const userEmail = userData?.user?.email;
-
-    if (!userEmail) {
-      return res.status(404).json({ error: "Email not found" });
-    }
-
-    if (process.env.NODE_ENV !== "production") {
-      console.log("📩 Mock email (development mode)");
-      console.log("To:", userEmail);
-      console.log("Subject:", subject);
-      console.log("Text:", text);
-      console.log("HTML:", html || "");
-      return res.json({ message: "Mock email printed to console" });
-    }
-
-    await transporter.sendMail({
-      from: process.env.MAIL_FROM || "Support <no-reply@yourapp.com>",
-      to: userEmail,
-      subject,
-      text,
-      html,
-    });
-
-    res.json({ message: "Email sent" });
+    return res.json({ message: "Notification sent" });
   } catch (err) {
-    console.error("sendEmailToCustomer error:", err);
-    res.status(500).json({ error: "Server error sending email" });
+    console.error("sendNotificationToCustomer error:", err);
+    res.status(500).json({ error: "Server error sending notification" });
   }
 };
+
+
 
 /* ---------------------------------------------------------
    SUBSCRIPTION HISTORY

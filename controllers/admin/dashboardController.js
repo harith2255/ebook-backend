@@ -44,14 +44,22 @@ const realUsers = profileUsers.filter(
 const totalUsers = realUsers.length;
 
 
+/* -------------------------------------------------------
+   ACTIVE SUBSCRIPTIONS (REAL DATA)
+------------------------------------------------------- */
+const nowISO = new Date().toISOString();
 
-    /* -------------------------------------------------------
-       2. ACTIVE SUBSCRIPTIONS
-    ------------------------------------------------------- */
-    const { count: activeSubs } = await supabase
-      .from("subscriptions")
-      .select("*", { count: "exact", head: true })
-      .eq("status", "active");
+const { count: activeSubs, error: activeErr } = await supabase
+  .from("user_subscriptions")
+  .select("*", { count: "exact", head: true })
+  .eq("status", "active")
+  .gte("expires_at", nowISO); // must not be expired
+
+if (activeErr) {
+  console.error("Active Subscriptions Error:", activeErr);
+}
+
+
 
     /* -------------------------------------------------------
        3. BOOKS SOLD
