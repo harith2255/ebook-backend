@@ -6,29 +6,27 @@ import supabase from "../utils/supabaseClient.js";
 export const getUserLibrary = async (req, res) => {
   const userId = req.user.id;
 
-  // in getUserLibrary:
-const { data, error } = await supabase
-  .from("user_library")
-  .select(`
-    id,
-    progress,
-    last_page,
-    added_at,
-    book_id,
-    ebooks:ebooks!inner (
+  const { data, error } = await supabase
+    .from("user_library")
+    .select(`
       id,
-      title,
-      author,
-      category,
-      description,
-      file_url,
-      pages,
-      price,
-      sales
-    )
-  `)
-  .eq("user_id", userId);
-
+      progress,
+      last_page,
+      added_at,
+      book_id,
+      ebooks:ebooks!inner (
+        id,
+        title,
+        author,
+        category,
+        description,
+        file_url,
+        pages,
+        price,
+        sales
+      )
+    `)
+    .eq("user_id", userId);
 
   if (error) return res.status(400).json({ error: error.message });
   res.json(data);
@@ -41,7 +39,6 @@ export const addBookToLibrary = async (req, res) => {
   const userId = req.user.id;
   const { bookId } = req.params;
 
-  // Ensure book exists in ebooks table
   const { data: book } = await supabase
     .from("ebooks")
     .select("id")
@@ -50,7 +47,6 @@ export const addBookToLibrary = async (req, res) => {
 
   if (!book) return res.status(400).json({ error: "Book does not exist" });
 
-  // Check if already added
   const { data: existing } = await supabase
     .from("user_library")
     .select("id")
@@ -61,10 +57,9 @@ export const addBookToLibrary = async (req, res) => {
   if (existing)
     return res.json({ message: "Book already in library", alreadyAdded: true });
 
-  // Insert new row
   const { error } = await supabase
     .from("user_library")
-    .insert([{ user_id: userId, book_id: bookId, progress: 0 }]);
+    .insert([{ user_id: userId, book_id: bookId, progress: 0, last_page: 1 }]);
 
   if (error) return res.status(400).json({ error: error.message });
 
@@ -214,7 +209,6 @@ export const searchLibrary = async (req, res) => {
 
     if (error) throw error;
 
-    // Manual case-insensitive filter
     const filtered = data.filter((entry) =>
       entry.ebooks?.title?.toLowerCase().includes(query.toLowerCase())
     );
@@ -307,15 +301,13 @@ export const removeBookFromCollection = async (req, res) => {
 export const deleteCollection = async (req, res) => {
   const { id } = req.params;
 
-  const { error } = await supabase
-    .from("collections")
-    .delete()
-    .eq("id", id);
+  const { error } = await supabase.from("collections").delete().eq("id", id);
 
   if (error) return res.status(400).json({ error: error.message });
 
   res.json({ message: "Collection deleted" });
 };
+
 /* ============================================
    📝 UPDATE READING PROGRESS
 ============================================ */
@@ -334,13 +326,17 @@ export const updateReadingProgress = async (req, res) => {
 
   res.json({ message: "Progress updated", progress });
 };
+
+/* ============================================
+   📝 START READING
+============================================ */
 export const startReading = async (req, res) => {
   const userId = req.user.id;
   const { book_id } = req.body;
 
   const { error } = await supabase
     .from("user_library")
-    .update({ progress: 1 })  // mark started
+    .update({ progress: 1 })
     .eq("user_id", userId)
     .eq("book_id", book_id);
 
@@ -348,6 +344,10 @@ export const startReading = async (req, res) => {
 
   res.json({ message: "Reading started" });
 };
+
+/* ============================================
+   🎯 MARK COMPLETED
+============================================ */
 export const markBookCompleted = async (req, res) => {
   const userId = req.user.id;
   const { bookId } = req.params;
@@ -362,47 +362,41 @@ export const markBookCompleted = async (req, res) => {
 
   res.json({ message: "Book marked completed" });
 };
+
 /* ============================================
-   📝 HIGHLIGHTS
-   POST /api/library/highlights
-   GET  /api/library/highlights/:bookId
-   DELETE /api/library/highlights/:id
-   Body for POST: { book_id, page, text, color, x?, y?, width?, height? }
+   📝 SAVE HIGHLIGHT
 ============================================ */
 export const saveHighlight = async (req, res) => {
-  console.log("Incoming highlight data:", req.body);
-
   try {
     const userId = req.user.id;
     const {
-  book_id,
-  page,
-  x_pct,
-  y_pct,
-  w_pct,
-  h_pct,
-  color = "rgba(255,255,0,0.35)",
-  note = ""
-} = req.body;
-
-const { data, error } = await supabase
-  .from("highlights")
-  .insert([
-    {
-      user_id: userId,
       book_id,
       page,
-      x: x_pct,
-      y: y_pct,
-      width: w_pct,
-      height: h_pct,
-      color,
-      text: note
-    }
-  ])
-  .select()
-  .single();
+      x_pct,
+      y_pct,
+      w_pct,
+      h_pct,
+      color = "rgba(255,255,0,0.35)",
+      note = "",
+    } = req.body;
 
+    const { data, error } = await supabase
+      .from("highlights")
+      .insert([
+        {
+          user_id: userId,
+          book_id,
+          page,
+          x: x_pct,
+          y: y_pct,
+          width: w_pct,
+          height: h_pct,
+          color,
+          text: note,
+        },
+      ])
+      .select()
+      .single();
 
     if (error) return res.status(400).json({ error: error.message });
 
@@ -413,7 +407,9 @@ const { data, error } = await supabase
   }
 };
 
-
+/* ============================================
+   📚 GET HIGHLIGHTS BY BOOK
+============================================ */
 export const getHighlightsForBook = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -427,8 +423,7 @@ export const getHighlightsForBook = async (req, res) => {
 
     if (error) return res.status(400).json({ error: error.message });
 
-    // convert DB fields to frontend naming convention
-    const mapped = data.map(h => ({
+    const mapped = data.map((h) => ({
       id: h.id,
       page: h.page,
       color: h.color,
@@ -436,7 +431,7 @@ export const getHighlightsForBook = async (req, res) => {
       xPct: h.x,
       yPct: h.y,
       wPct: h.width,
-      hPct: h.height
+      hPct: h.height,
     }));
 
     res.json(mapped);
@@ -446,7 +441,9 @@ export const getHighlightsForBook = async (req, res) => {
   }
 };
 
-
+/* ============================================
+   🗑 DELETE HIGHLIGHT
+============================================ */
 export const deleteHighlight = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -459,6 +456,7 @@ export const deleteHighlight = async (req, res) => {
       .eq("user_id", userId);
 
     if (error) return res.status(400).json({ error: error.message });
+
     res.json({ message: "Highlight deleted" });
   } catch (err) {
     console.error("deleteHighlight error:", err);
@@ -467,8 +465,49 @@ export const deleteHighlight = async (req, res) => {
 };
 
 /* ============================================
-   📝 UPDATE READING PROGRESS (updated to store last_page)
-   PUT /api/library/progress/:bookId
-   Body optionally: { progress, currentPage }
+   📖 GET LAST PAGE
 ============================================ */
+export const getLastPage = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { bookId } = req.params;
 
+    const { data, error } = await supabase
+      .from("user_library")
+      .select("last_page")
+      .eq("user_id", userId)
+      .eq("book_id", bookId)
+      .maybeSingle();
+
+    if (error) return res.status(400).json({ error: error.message });
+
+    res.json({ last_page: data?.last_page || 1 });
+  } catch (err) {
+    console.error("getLastPage error:", err);
+    res.status(500).json({ error: "Failed to load last page" });
+  }
+};
+
+/* ============================================
+   📖 SAVE LAST PAGE
+============================================ */
+export const saveLastPage = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { bookId } = req.params;
+    const { last_page } = req.body;
+
+    const { error } = await supabase
+      .from("user_library")
+      .update({ last_page })
+      .eq("user_id", userId)
+      .eq("book_id", bookId);
+
+    if (error) return res.status(400).json({ error: error.message });
+
+    res.json({ message: "Last page saved", last_page });
+  } catch (err) {
+    console.error("saveLastPage error:", err);
+    res.status(500).json({ error: "Failed to save last page" });
+  }
+};

@@ -268,3 +268,48 @@ export const uploadUserAttachment = (req, res) => {
   });
 };
 
+export const getSingleWritingOrder = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+
+    const { data, error } = await supabase
+      .from("writing_orders")
+      .select("*")
+      .eq("id", id)
+      .eq("user_id", userId)
+      .single();
+
+    if (error) return res.status(404).json({ error: "Order not found" });
+
+    res.json(data);
+  } catch (err) {
+    console.error("getSingleWritingOrder error:", err);
+    res.status(500).json({ error: "Failed to load order" });
+  }
+};
+export const checkoutWritingOrder = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { orderId } = req.body;
+
+    // Mark as Paid
+    const { data, error } = await supabase
+      .from("writing_orders")
+      .update({
+        status: "Paid",
+        paid_at: new Date().toISOString(),
+      })
+      .eq("id", orderId)
+      .eq("user_id", userId)
+      .select()
+      .single();
+
+    if (error) return res.status(400).json({ error: error.message });
+
+    res.json({ message: "Payment successful", order: data });
+  } catch (err) {
+    console.error("checkoutWritingOrder error:", err);
+    res.status(500).json({ error: "Checkout failed" });
+  }
+};

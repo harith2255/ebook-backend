@@ -1,3 +1,4 @@
+// controllers/dashboardController.js
 import supabase from "../utils/supabaseClient.js";
 
 /**
@@ -8,10 +9,14 @@ export async function getDashboardData(req, res) {
   try {
     console.log("USER INSIDE BACKEND:", req.user);
 
-    const userId = req.user.id || req.user.user_metadata?.app_user_id;
+    const userId = req.user?.id || req.user?.user_metadata?.app_user_id;
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized: Missing userId" });
+    }
 
     /* --------------------
-        1️⃣ Books Completed
+       1️⃣ Books Completed
     -------------------- */
     console.log("STEP 1: Fetch books completed");
     const { count: booksRead, error: booksError } = await supabase
@@ -93,47 +98,50 @@ export async function getDashboardData(req, res) {
     const activeStreak = streakData?.streak_days || 0;
 
     /* -------------------
-        5️⃣ Continue Reading
+        5️⃣ Continue Reading (JOIN 🟢 Optimized)
+        NOTE: include file_url and pages for PDF viewer
     --------------------- */
-    console.log("STEP 6: Fetch user_library rows");
-    const { data: userLibRows, error: userLibError } = await supabase
+    console.log("STEP 6: Fetch user_library rows (recent books) with file_url");
+    const { data: recentBooksRaw, error: recentBooksError } = await supabase
       .from("user_library")
-      .select("book_id, progress, added_at")
+      .select(
+        `
+        book_id,
+        progress,
+        added_at,
+        ebooks (
+          id,
+          title,
+          author,
+          cover_url,
+          description,
+          file_url,
+          pages
+        )
+      `
+      )
       .eq("user_id", userId)
       .order("added_at", { ascending: false })
       .limit(3);
 
-    if (userLibError) throw userLibError;
+    if (recentBooksError) throw recentBooksError;
 
-    console.log("STEP 6.1: Fetching books for user_library");
-    const recentBooks = [];
+    // Safety: ensure each entry returns an `ebooks` object
+    // and provide a fallback cover_url if missing (uploaded local file path)
+    const FALLBACK_COVER_PATH = "/mnt/data/397e2adf-175b-45d7-b8b0-a860b51d99a3.png";
 
-
-for (const row of userLibRows || []) {
-
-  // Skip bad or null values
-  if (!row.book_id || typeof row.book_id !== "string") {
-    console.warn("⚠ Skipping row with invalid book_id:", row);
-    continue;
-  }
-
-  const { data: bookData, error: bookError } = await supabase
-    .from("books")
-    .select("id, title, author, cover_url, description")
-    .eq("id", row.book_id)
-    .maybeSingle();
-
-  // Skip if book not found
-  if (bookError || !bookData) {
-    console.warn("⚠ Book not found for:", row.book_id);
-    continue;
-  }
-
-  recentBooks.push({
-    ...row,
-    books: bookData,
-  });
-}
+    const recentBooks = (recentBooksRaw || []).map((row) => {
+      const book = row?.ebooks || null;
+      if (book) {
+        // ensure file_url present (important for BookReader)
+        book.file_url = book.file_url || null;
+        book.cover_url = book.cover_url || FALLBACK_COVER_PATH;
+      }
+      return {
+        ...row,
+        ebooks: book,
+      };
+    });
 
     /* -------------------
         6️⃣ User Info
@@ -170,7 +178,7 @@ for (const row of userLibRows || []) {
     }
 
     // FINAL RESPONSE:
-    res.json({
+    return res.json({
       user: userData,
       stats: {
         booksRead: booksRead || 0,
@@ -192,12 +200,11 @@ for (const row of userLibRows || []) {
       },
     });
   } catch (err) {
-    console.error("🔥 FULL DASHBOARD ERROR:", err);
-    console.error("🔥 ERROR MESSAGE:", err.message);
-    console.error("🔥 ERROR DETAILS:", err.details);
-    console.error("🔥 ERROR HINT:", err.hint);
-    console.error("🔥 ERROR CODE:", err.code);
-
-    res.status(500).json({ error: "Failed to fetch dashboard data" });
+    console.error("🔥 DASHBOARD ERROR:", err);
+    console.error("🔥 ERROR MESSAGE:", err?.message);
+    console.error("🔥 ERROR DETAILS:", err?.details);
+    console.error("🔥 ERROR HINT:", err?.hint);
+    console.error("🔥 ERROR CODE:", err?.code);
+    return res.status(500).json({ error: "Failed to fetch dashboard data" });
   }
 }

@@ -7,7 +7,9 @@ import {
   updateOrder,
   sendFeedback,
   getFeedbackForOrder,
-  uploadUserAttachment
+  uploadUserAttachment,
+  getSingleWritingOrder,
+  checkoutWritingOrder
 
 } from "../controllers/writingController.js";
 
@@ -29,6 +31,8 @@ router.put("/orders/:id", updateOrder);
 router.post("/feedback", sendFeedback);
 router.get("/feedback/:order_id", getFeedbackForOrder);
 router.post("/upload", uploadUserAttachment);
+router.get("/order/:id", verifySupabaseAuth, getSingleWritingOrder);
+router.post("/checkout", verifySupabaseAuth, checkoutWritingOrder);
 
 
 export default router;
