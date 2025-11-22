@@ -30,7 +30,6 @@ export const placeOrder = async (req, res) => {
       deadline,
       total_price,
       instructions,        // ✅ ADD THIS
-      citation_style,      // ✅ ADD THIS
       attachments_url      // OPTIONAL
     } = req.body;
 
@@ -47,7 +46,6 @@ export const placeOrder = async (req, res) => {
           pages,
           deadline,
           instructions,       // ✅ SAVE IT
-          citation_style,     // ✅ SAVE IT
           attachments_url: attachments_url || null,
           total_price,
           status: "Pending",

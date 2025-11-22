@@ -6,26 +6,29 @@ import supabase from "../utils/supabaseClient.js";
 export const getUserLibrary = async (req, res) => {
   const userId = req.user.id;
 
-  const { data, error } = await supabase
-    .from("user_library")
-    .select(`
+  // in getUserLibrary:
+const { data, error } = await supabase
+  .from("user_library")
+  .select(`
+    id,
+    progress,
+    last_page,
+    added_at,
+    book_id,
+    ebooks:ebooks!inner (
       id,
-      progress,
-      added_at,
-      book_id,
-      ebooks:ebooks!inner (
-        id,
-        title,
-        author,
-        category,
-        description,
-        file_url,
-        pages,
-        price,
-        sales
-      )
-    `)
-    .eq("user_id", userId);
+      title,
+      author,
+      category,
+      description,
+      file_url,
+      pages,
+      price,
+      sales
+    )
+  `)
+  .eq("user_id", userId);
+
 
   if (error) return res.status(400).json({ error: error.message });
   res.json(data);
@@ -313,3 +316,159 @@ export const deleteCollection = async (req, res) => {
 
   res.json({ message: "Collection deleted" });
 };
+/* ============================================
+   📝 UPDATE READING PROGRESS
+============================================ */
+export const updateReadingProgress = async (req, res) => {
+  const userId = req.user.id;
+  const { bookId } = req.params;
+  const { progress } = req.body;
+
+  const { error } = await supabase
+    .from("user_library")
+    .update({ progress })
+    .eq("user_id", userId)
+    .eq("book_id", bookId);
+
+  if (error) return res.status(400).json({ error: error.message });
+
+  res.json({ message: "Progress updated", progress });
+};
+export const startReading = async (req, res) => {
+  const userId = req.user.id;
+  const { book_id } = req.body;
+
+  const { error } = await supabase
+    .from("user_library")
+    .update({ progress: 1 })  // mark started
+    .eq("user_id", userId)
+    .eq("book_id", book_id);
+
+  if (error) return res.status(400).json({ error: error.message });
+
+  res.json({ message: "Reading started" });
+};
+export const markBookCompleted = async (req, res) => {
+  const userId = req.user.id;
+  const { bookId } = req.params;
+
+  const { error } = await supabase
+    .from("user_library")
+    .update({ progress: 100 })
+    .eq("user_id", userId)
+    .eq("book_id", bookId);
+
+  if (error) return res.status(400).json({ error: error.message });
+
+  res.json({ message: "Book marked completed" });
+};
+/* ============================================
+   📝 HIGHLIGHTS
+   POST /api/library/highlights
+   GET  /api/library/highlights/:bookId
+   DELETE /api/library/highlights/:id
+   Body for POST: { book_id, page, text, color, x?, y?, width?, height? }
+============================================ */
+export const saveHighlight = async (req, res) => {
+  console.log("Incoming highlight data:", req.body);
+
+  try {
+    const userId = req.user.id;
+    const {
+  book_id,
+  page,
+  x_pct,
+  y_pct,
+  w_pct,
+  h_pct,
+  color = "rgba(255,255,0,0.35)",
+  note = ""
+} = req.body;
+
+const { data, error } = await supabase
+  .from("highlights")
+  .insert([
+    {
+      user_id: userId,
+      book_id,
+      page,
+      x: x_pct,
+      y: y_pct,
+      width: w_pct,
+      height: h_pct,
+      color,
+      text: note
+    }
+  ])
+  .select()
+  .single();
+
+
+    if (error) return res.status(400).json({ error: error.message });
+
+    res.json(data);
+  } catch (err) {
+    console.error("saveHighlight error:", err);
+    res.status(500).json({ error: "Failed to save highlight" });
+  }
+};
+
+
+export const getHighlightsForBook = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { bookId } = req.params;
+
+    const { data, error } = await supabase
+      .from("highlights")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("book_id", bookId);
+
+    if (error) return res.status(400).json({ error: error.message });
+
+    // convert DB fields to frontend naming convention
+    const mapped = data.map(h => ({
+      id: h.id,
+      page: h.page,
+      color: h.color,
+      text: h.text,
+      xPct: h.x,
+      yPct: h.y,
+      wPct: h.width,
+      hPct: h.height
+    }));
+
+    res.json(mapped);
+  } catch (err) {
+    console.error("getHighlightsForBook error:", err);
+    res.status(500).json({ error: "Failed to load highlights" });
+  }
+};
+
+
+export const deleteHighlight = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+
+    const { error } = await supabase
+      .from("highlights")
+      .delete()
+      .eq("id", id)
+      .eq("user_id", userId);
+
+    if (error) return res.status(400).json({ error: error.message });
+    res.json({ message: "Highlight deleted" });
+  } catch (err) {
+    console.error("deleteHighlight error:", err);
+    res.status(500).json({ error: "Failed to delete highlight" });
+  }
+};
+
+/* ============================================
+   📝 UPDATE READING PROGRESS (updated to store last_page)
+   PUT /api/library/progress/:bookId
+   Body optionally: { progress, currentPage }
+============================================ */
+
