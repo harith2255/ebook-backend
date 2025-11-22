@@ -8,16 +8,7 @@ import supabase from "./utils/supabaseClient.js";
 dotenv.config();
 const app = express();
 
-// ---------- Middleware ----------
-app.use(bodyParser.json());
-app.use(
-  cors({
-    origin: process.env.FRONTEND_URL,
-    credentials: true,
-  })
-);
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+
 
 // cors
 app.use(
@@ -34,6 +25,14 @@ app.use(
     allowedHeaders: ["Content-Type", "Authorization"]
   })
 );
+
+// ---------- Middleware ----------
+app.use(bodyParser.json());
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+
 
 // ---------- CRON JOB ----------
 cron.schedule("*/5 * * * *", async () => {
