@@ -511,3 +511,17 @@ export const saveLastPage = async (req, res) => {
     res.status(500).json({ error: "Failed to save last page" });
   }
 };
+// Rename collection
+export const renameCollection = async (req, res) => {
+  const { id } = req.params;
+  const { name } = req.body;
+
+  const { error } = await supabase
+    .from("collections")
+    .update({ name })
+    .eq("id", id);
+
+  if (error) return res.status(400).json({ error: error.message });
+
+  res.json({ message: "Collection renamed" });
+};

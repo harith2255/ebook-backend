@@ -1,4 +1,4 @@
-import supabase from "../../utils/supabaseClient.js";
+import { supabaseAdmin } from "../../utils/supabaseClient.js";
 
 const formatMonth = (date) =>
   new Date(date).toLocaleString("en-US", { month: "short" });
@@ -14,8 +14,9 @@ export const getAdminDashboard = async (req, res) => {
   try {
     /* ---------------------------------------------
        REAL USERS (FROM PROFILES — ALWAYS ACCURATE)
+       🔧 FIX: Use supabaseAdmin instead of supabase
     --------------------------------------------- */
-    const { data: profiles, error: profErr } = await supabase
+    const { data: profiles, error: profErr } = await supabaseAdmin
       .from("profiles")
       .select("id, created_at");
 
@@ -28,10 +29,11 @@ export const getAdminDashboard = async (req, res) => {
 
     /* -------------------------------------------------------
        ACTIVE SUBSCRIPTIONS
+       🔧 FIX: Use supabaseAdmin
     ------------------------------------------------------- */
     const nowISO = new Date().toISOString();
 
-    const { count: activeSubs } = await supabase
+    const { count: activeSubs } = await supabaseAdmin
       .from("user_subscriptions")
       .select("*", { count: "exact", head: true })
       .eq("status", "active")
@@ -39,18 +41,20 @@ export const getAdminDashboard = async (req, res) => {
 
     /* -------------------------------------------------------
        BOOKS SOLD
+       🔧 FIX: Use supabaseAdmin
     ------------------------------------------------------- */
-    const { count: booksSold } = await supabase
+    const { count: booksSold } = await supabaseAdmin
       .from("book_sales")
       .select("*", { count: "exact", head: true });
 
     /* -------------------------------------------------------
        REVENUE (MTD)
+       🔧 FIX: Use supabaseAdmin
     ------------------------------------------------------- */
     const firstDay = new Date();
     firstDay.setDate(1);
 
-    const { data: revenueMonth } = await supabase
+    const { data: revenueMonth } = await supabaseAdmin
       .from("revenue")
       .select("amount, created_at")
       .gte("created_at", firstDay.toISOString());
@@ -60,11 +64,12 @@ export const getAdminDashboard = async (req, res) => {
 
     /* -------------------------------------------------------
        REVENUE TREND (LAST 6 MONTHS)
+       🔧 FIX: Use supabaseAdmin
     ------------------------------------------------------- */
     const sixMonthsAgo = new Date();
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
 
-    const { data: revRows } = await supabase
+    const { data: revRows } = await supabaseAdmin
       .from("revenue")
       .select("amount, created_at")
       .gte("created_at", sixMonthsAgo.toISOString());
@@ -134,8 +139,9 @@ export const getAdminDashboard = async (req, res) => {
 
     /* -------------------------------------------------------
        RECENT ACTIVITY
+       🔧 FIX: Use supabaseAdmin
     ------------------------------------------------------- */
-    const { data: recentActivity } = await supabase
+    const { data: recentActivity } = await supabaseAdmin
       .from("activity_log")
       .select("*")
       .order("created_at", { ascending: false })
