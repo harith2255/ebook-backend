@@ -156,20 +156,41 @@ try {
 
 
     if (table === "mock_tests") {
-      insertObj = {
-        title,
-        scheduled_date: req.body.scheduled_date
-          ? new Date(req.body.scheduled_date).toISOString()
-          : new Date().toISOString(),
-        total_questions: Number(req.body.total_questions || 0),
-        duration_minutes: Number(req.body.duration_minutes || 0),
-        created_at: new Date().toISOString(),
-        subject: req.body.subject || category || "General",
-        difficulty: req.body.difficulty || "Medium",
-        participants: 0,
-         mcqs,
-      };
+  // Parse scheduled date or default to NOW
+  const scheduledRaw = req.body.scheduled_date;
+  let start_time = null;
+
+  if (scheduledRaw) {
+    const parsed = new Date(scheduledRaw);
+    if (!isNaN(parsed.getTime())) {
+      start_time = parsed.toISOString();
+    } else {
+      console.warn("⚠️ Invalid scheduled_date format:", scheduledRaw);
+      start_time = new Date().toISOString();
     }
+  } else {
+    // NO SCHEDULED DATE → test starts immediately
+    start_time = new Date().toISOString();
+  }
+
+  // Auto calculate end time using duration_minutes
+  const duration = Number(req.body.duration_minutes || 0);
+  const end_time = new Date(new Date(start_time).getTime() + duration * 60000).toISOString();
+
+  insertObj = {
+    title,
+    start_time,
+    end_time,
+    total_questions: Number(req.body.total_questions || 0),
+    duration_minutes: duration,
+    created_at: new Date().toISOString(),
+    subject: req.body.subject || category || "General",
+    difficulty: req.body.difficulty || "Medium",
+    participants: 0,
+    mcqs,
+  };
+}
+
 
     const { data, error } = await supabase
       .from(table)

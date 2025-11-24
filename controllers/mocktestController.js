@@ -1,28 +1,34 @@
 import supabase from "../utils/supabaseClient.js";
 
+// 📌 Fetch Available + Upcoming Tests
 export const getAvailableTests = async (req, res) => {
-  const { data, error } = await supabase
-    .from("mock_tests")
-    .select("*, mcqs")
-    .order("created_at", { ascending: false });
+  try {
+    const { data, error } = await supabase
+      .from("mock_tests")
+      .select("*, mcqs")
+      .order("start_time", { ascending: true }); // sort upcoming first
 
-  if (error) return res.status(400).json({ error: error.message });
-  res.json(data);
+    if (error) return res.status(400).json({ error: error.message });
+
+    return res.json(data);  // MUST RETURN ARRAY
+  } catch (e) {
+    return res.status(500).json({ error: "Failed to fetch tests" });
+  }
 };
 
+
+// 📌 Fetch Test Details
 export const getTestDetails = async (req, res) => {
   try {
     const { id } = req.params;
 
     const { data, error } = await supabase
       .from("mock_tests")
-      .select("id, title, subject, duration_minutes, total_questions, mcqs")
+      .select("id, title, subject, duration_minutes, total_questions, start_time, mcqs")
       .eq("id", id)
       .single();
 
-    if (error) {
-      return res.status(400).json({ error: error.message });
-    }
+    if (error) return res.status(400).json({ error: error.message });
 
     return res.json(data);
 
@@ -31,8 +37,7 @@ export const getTestDetails = async (req, res) => {
   }
 };
 
-
-
+// 📌 Ongoing Tests
 export const getOngoingTests = async (req, res) => {
   const userId = req.user.id;
 
@@ -42,7 +47,7 @@ export const getOngoingTests = async (req, res) => {
       id,
       test_id,
       completed_questions,
-      mock_tests (*)
+      mock_tests(*)
     `)
     .eq("user_id", userId)
     .eq("status", "ongoing");
@@ -52,6 +57,7 @@ export const getOngoingTests = async (req, res) => {
   res.json(data);
 };
 
+// 📌 Completed Tests
 export const getCompletedTests = async (req, res) => {
   const userId = req.user.id;
 
@@ -73,6 +79,7 @@ export const getCompletedTests = async (req, res) => {
   res.json(data);
 };
 
+// 📌 Leaderboard
 export const getLeaderboard = async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -80,19 +87,15 @@ export const getLeaderboard = async (req, res) => {
       .select("user_id, display_name, average_score, tests_taken")
       .order("average_score", { ascending: false });
 
-    if (error) {
-      return res.status(500).json({ error: error.message });
-    }
+    if (error) return res.status(500).json({ error: error.message });
 
     return res.json(data);
-
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
 };
 
-
-
+// 📌 Stats
 export const getStats = async (req, res) => {
   const userId = req.user.id;
 
@@ -115,6 +118,8 @@ export const getStats = async (req, res) => {
     total_study_time: totalStudyTime
   });
 };
+
+// 📌 Start Test
 export const startTest = async (req, res) => {
   try {
     const { test_id } = req.body;
@@ -122,7 +127,7 @@ export const startTest = async (req, res) => {
 
     if (!test_id) return res.status(400).json({ error: "Missing test_id" });
 
-    // fetch test with mcqs
+    // fetch test
     const { data: test, error: testErr } = await supabase
       .from("mock_tests")
       .select("*, mcqs")
@@ -130,6 +135,11 @@ export const startTest = async (req, res) => {
       .single();
 
     if (testErr) return res.status(400).json({ error: testErr.message });
+
+    // Upcoming tests: block start early
+    if (test.start_time && new Date(test.start_time) > new Date()) {
+      return res.status(400).json({ error: "This test has not started yet." });
+    }
 
     // create attempt
     const { data: attempt, error: err1 } = await supabase
@@ -150,9 +160,9 @@ export const startTest = async (req, res) => {
     // increment participants
     await supabase.rpc("increment_participants", { testid: test_id });
 
-    return res.json({ attempt, test }); // <-- RETURN QUESTIONS
+    return res.json({ attempt, test });
+
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
 };
-
