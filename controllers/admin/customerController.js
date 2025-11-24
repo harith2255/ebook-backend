@@ -1,5 +1,8 @@
 // controllers/customerController.js
-import supabase from "../../utils/supabaseClient.js";
+import {
+  supabaseAdmin,
+  supabasePublic
+} from "../../utils/supabaseClient.js";
 
 import nodemailer from "nodemailer";
 
@@ -15,7 +18,8 @@ export const listCustomers = async (req, res) => {
 
     const { search, status, plan } = req.query;
 
-    let query = supabase.from("v_customers").select("*", { count: "exact" });
+    // ⚠ MUST use admin client
+    let query = supabaseAdmin.from("v_customers").select("*", { count: "exact" });
 
     if (status) query = query.eq("status", status);
     if (plan) query = query.eq("plan", plan);
@@ -42,16 +46,17 @@ export const listCustomers = async (req, res) => {
   }
 };
 
+
+
 /* ---------------------------------------------------------
-   SUSPEND / ACTIVATE USER
+   SUSPEND USER
 --------------------------------------------------------- */
 export const suspendCustomer = async (req, res) => {
   try {
     const { id } = req.params;
-    console.log("⚠️ Suspend request for:", id);
 
-    // 1. Update profiles table
-    const { error: profileError } = await supabase
+    // 1. Update profile
+    const { error: profileError } = await supabaseAdmin
       .from("profiles")
       .update({ status: "Suspended" })
       .eq("id", id);
@@ -59,9 +64,9 @@ export const suspendCustomer = async (req, res) => {
     if (profileError)
       return res.status(400).json({ error: profileError.message });
 
-    // 2. Auth: Set permanent ban
-    const { error: authError } = await supabase.auth.admin.updateUserById(id, {
-      ban_until: new Date("9999-12-31T23:59:59Z").toISOString(),
+    // 2. Ban user
+    const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(id, {
+      ban_until: "9999-12-31T23:59:59Z"
     });
 
     if (authError)
@@ -76,26 +81,21 @@ export const suspendCustomer = async (req, res) => {
 
 
 
+/* ---------------------------------------------------------
+   ACTIVATE USER
+--------------------------------------------------------- */
 export const activateCustomer = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // 1. Update profiles table
-    const { error: profileError } = await supabase
+    await supabaseAdmin
       .from("profiles")
       .update({ status: "Active" })
       .eq("id", id);
 
-    if (profileError)
-      return res.status(400).json({ error: profileError.message });
-
-    // 2. Remove ban
-    const { error: authError } = await supabase.auth.admin.updateUserById(id, {
-      ban_until: null,
+    await supabaseAdmin.auth.admin.updateUserById(id, {
+      ban_until: null
     });
-
-    if (authError)
-      return res.status(400).json({ error: authError.message });
 
     res.json({ message: "Customer activated successfully" });
   } catch (err) {
@@ -107,7 +107,7 @@ export const activateCustomer = async (req, res) => {
 
 
 /* ---------------------------------------------------------
-   EMAIL CUSTOMER
+   EMAIL / NOTIFICATIONS
 --------------------------------------------------------- */
 export const sendNotificationToCustomer = async (req, res) => {
   try {
@@ -118,26 +118,22 @@ export const sendNotificationToCustomer = async (req, res) => {
       return res.status(400).json({ error: "title and message required" });
     }
 
-    // Force only valid DB columns
     const payload = {
       user_id: id,
       title,
       message,
       link: link || "dashboard",
-      is_read: false,  // correct column
+      is_read: false,
       created_at: new Date().toISOString(),
     };
 
-    const { error } = await supabase
-      .from("user_notifications")
-      .insert(payload);
+    const { error } = await supabaseAdmin.from("user_notifications").insert(payload);
 
-    if (error) {
-      console.error("Supabase Insert Error:", error);
+    if (error)
       return res.status(400).json({ error: error.message });
-    }
 
-    return res.json({ message: "Notification sent" });
+    res.json({ message: "Notification sent" });
+
   } catch (err) {
     console.error("sendNotificationToCustomer error:", err);
     res.status(500).json({ error: "Server error sending notification" });
@@ -153,20 +149,24 @@ export const getSubscriptionHistory = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from("subscriptions")
       .select("*")
       .eq("user_id", id)
       .order("created_at", { ascending: false });
 
-    if (error) return res.status(400).json({ error: error.message });
+    if (error)
+      return res.status(400).json({ error: error.message });
 
     res.json({ subscriptions: data });
+
   } catch (err) {
     console.error("getSubscriptionHistory error:", err);
-    res.status(500).json({ error: "Server error getting subscriptions" });
+    res.status(500).json({ error: "Server error" });
   }
 };
+
+
 
 /* ---------------------------------------------------------
    ADD SUBSCRIPTION
@@ -174,15 +174,13 @@ export const getSubscriptionHistory = async (req, res) => {
 export const addSubscription = async (req, res) => {
   try {
     const { id } = req.params;
-    const { plan, amount, status, start_date, end_date } = req.body;
+    const { plan, amount, status } = req.body;
 
     if (!plan || amount == null) {
-      return res
-        .status(400)
-        .json({ error: "plan and amount are required" });
+      return res.status(400).json({ error: "plan and amount are required" });
     }
 
-    const { data, error } = await supabase
+    const { data } = await supabaseAdmin
       .from("subscriptions")
       .insert([
         {
@@ -190,53 +188,47 @@ export const addSubscription = async (req, res) => {
           plan,
           amount,
           status: status ?? "active",
-          start_date: start_date ?? new Date(),
-          end_date: end_date ?? null,
+          start_date: new Date(),
         },
       ])
       .select()
       .single();
 
-    if (error) return res.status(400).json({ error: error.message });
-
-    const { data: profileRow } = await supabase
+    // Update total spent
+    const { data: profileRow } = await supabaseAdmin
       .from("profiles")
       .select("total_spent")
       .eq("id", id)
       .single();
 
-    const newTotal =
-      Number(profileRow?.total_spent || 0) + Number(data.amount);
+    const newTotal = Number(profileRow?.total_spent || 0) + Number(data.amount);
 
-    await supabase
+    await supabaseAdmin
       .from("profiles")
       .update({ total_spent: newTotal })
       .eq("id", id);
 
-    res
-      .status(201)
-      .json({ message: "Subscription added", subscription: data });
+    res.status(201).json({
+      message: "Subscription added",
+      subscription: data
+    });
+
   } catch (err) {
     console.error("addSubscription error:", err);
-    res.status(500).json({ error: "Server error adding subscription" });
+    res.status(500).json({ error: "Server error" });
   }
 };
 
+
+
 /* ---------------------------------------------------------
-   DELETE CUSTOMER (Auth User + Profile)
---------------------------------------------------------- */
-/* ---------------------------------------------------------
-   DELETE CUSTOMER (Auth + All Related Tables)
+   DELETE CUSTOMER (AUTH + ALL TABLES)
 --------------------------------------------------------- */
 export const deleteCustomer = async (req, res) => {
   try {
     const { id } = req.params;
 
-    console.log("Deleting user:", id);
-
-    // 1️⃣ DELETE ALL RELATED TABLES FIRST
     const tablesToClean = [
-      "profiles",
       "subscriptions",
       "book_sales",
       "activity_log",
@@ -250,29 +242,21 @@ export const deleteCustomer = async (req, res) => {
     ];
 
     for (const table of tablesToClean) {
-      await supabase.from(table).delete().eq("user_id", id);
+      await supabaseAdmin.from(table).delete().eq("user_id", id);
     }
 
-    // ❗ profiles table uses id not user_id
-    await supabase.from("profiles").delete().eq("id", id);
+    await supabaseAdmin.from("profiles").delete().eq("id", id);
 
-    // 2️⃣ DELETE FROM AUTH
-    const { error: authErr } = await supabase.auth.admin.deleteUser(id);
+    // DELETE AUTH USER
+    const { error: authErr } = await supabaseAdmin.auth.admin.deleteUser(id);
 
-    if (authErr) {
-      console.error("Auth delete error:", authErr.message);
+    if (authErr)
       return res.status(400).json({ error: authErr.message });
-    }
 
-    // 3️⃣ SUCCESS
-    res.json({
-      message: "User deleted from auth + all related tables successfully",
-    });
+    res.json({ message: "User fully deleted" });
 
   } catch (err) {
     console.error("deleteCustomer error:", err);
-    return res.status(500).json({
-      error: "Server error deleting customer",
-    });
+    res.status(500).json({ error: "Server error" });
   }
 };

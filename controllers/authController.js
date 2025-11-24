@@ -37,7 +37,7 @@ export async function register(req, res) {
       last_name,
       full_name,
       role: "User",
-      status: "active",
+      status: "Active",
       plan: "free",
     });
 

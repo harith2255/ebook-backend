@@ -156,6 +156,13 @@ import notificationsRoutes from "./routes/notificationRoutes.js";
 app.use("/api/notifications", notificationsRoutes);
 
 
+import cleanAuthUsers from "./routes/admin/cleanSeederRoutes.js";
+
+app.use("/api/admin", cleanAuthUsers);
+
+
+
+
 
 
 // Base Route

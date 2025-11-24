@@ -23,25 +23,21 @@ function percentChange(current, previous) {
 
 export const getAdminDashboard = async (req, res) => {
   try {
-    /* -------------------------------------------------------
-       1. TOTAL USERS (AUTH USERS)
-    ------------------------------------------------------- */
-const { data: profileUsers, error: profileErr } = await supabase
-  .from("profiles")
-  .select("id, email, created_at")
-  .not("email", "is", null)
-  .not("email", "eq", "");
+/* ---------------------------------------------
+   REAL AUTH USERS
+--------------------------------------------- */
+const {
+  data: { users },
+  error: authErr,
+} = await supabase.auth.admin.listUsers();
 
-if (profileErr) {
-  console.error("Profile Count Error:", profileErr);
-  return res.status(500).json({ error: "Unable to fetch users" });
+if (authErr) {
+  console.error("Auth fetch error:", authErr);
+  return res.status(500).json({ error: "Cannot load user count" });
 }
 
-const realUsers = profileUsers.filter(
-  (u) => u.email && u.email.trim() !== ""
-);
+const totalUsers = users.length;
 
-const totalUsers = realUsers.length;
 
 
 /* -------------------------------------------------------
@@ -103,8 +99,10 @@ if (activeErr) {
     /* -------------------------------------------------------
        6. USER SIGNUPS TREND (AUTH USERS)
     ------------------------------------------------------- */
-   const newUsers = realUsers.filter(
-  (u) => u.created_at && new Date(u.created_at) >= sixMonthsAgo
+const newUsers = users.filter(
+  (u) =>
+    u.created_at &&
+    new Date(u.created_at) >= sixMonthsAgo
 );
 
     const userGrowthTrend = {};
