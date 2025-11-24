@@ -5,7 +5,8 @@ import {
   getOngoingTests,
   getCompletedTests,
   getStats,
-  getLeaderboard
+  getLeaderboard,
+  getTestDetails
 } from "../controllers/mocktestController.js";
 
 import {
@@ -17,6 +18,8 @@ import {
 const router = express.Router();
 
 // ------------------ MOCK TESTS ------------------ //
+router.get("/test/:id", verifySupabaseAuth, getTestDetails);
+
 router.get("/", verifySupabaseAuth, getAvailableTests);
 router.get("/ongoing", verifySupabaseAuth, getOngoingTests);
 router.get("/completed", verifySupabaseAuth, getCompletedTests);

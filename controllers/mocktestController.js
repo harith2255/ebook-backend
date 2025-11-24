@@ -3,12 +3,35 @@ import supabase from "../utils/supabaseClient.js";
 export const getAvailableTests = async (req, res) => {
   const { data, error } = await supabase
     .from("mock_tests")
-    .select("*")
+    .select("*, mcqs")
     .order("created_at", { ascending: false });
 
   if (error) return res.status(400).json({ error: error.message });
   res.json(data);
 };
+
+export const getTestDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { data, error } = await supabase
+      .from("mock_tests")
+      .select("id, title, subject, duration_minutes, total_questions, mcqs")
+      .eq("id", id)
+      .single();
+
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    return res.json(data);
+
+  } catch (err) {
+    return res.status(500).json({ error: "Failed to load test details" });
+  }
+};
+
+
 
 export const getOngoingTests = async (req, res) => {
   const userId = req.user.id;
@@ -95,13 +118,20 @@ export const getStats = async (req, res) => {
 export const startTest = async (req, res) => {
   try {
     const { test_id } = req.body;
-    const user_id = req.user.id; // from auth middleware
+    const user_id = req.user.id;
 
-    if (!test_id) {
-      return res.status(400).json({ error: "Missing test_id" });
-    }
+    if (!test_id) return res.status(400).json({ error: "Missing test_id" });
 
-    // 1️⃣ Create new attempt
+    // fetch test with mcqs
+    const { data: test, error: testErr } = await supabase
+      .from("mock_tests")
+      .select("*, mcqs")
+      .eq("id", test_id)
+      .single();
+
+    if (testErr) return res.status(400).json({ error: testErr.message });
+
+    // create attempt
     const { data: attempt, error: err1 } = await supabase
       .from("mock_attempts")
       .insert({
@@ -117,11 +147,10 @@ export const startTest = async (req, res) => {
 
     if (err1) return res.status(400).json({ error: err1.message });
 
-    // 2️⃣ Increase participants count
+    // increment participants
     await supabase.rpc("increment_participants", { testid: test_id });
 
-    return res.json({ attempt });
-
+    return res.json({ attempt, test }); // <-- RETURN QUESTIONS
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }

@@ -11,7 +11,6 @@ import {
 const router = express.Router();
 
 router.post("/start", verifySupabaseAuth, startTest);
-router.get("/:test_id/questions", verifySupabaseAuth, getQuestions);
 router.post("/save-answer", verifySupabaseAuth, saveAnswer);
 router.post("/finish", verifySupabaseAuth, finishTest);
 router.get("/attempt/:attempt_id", verifySupabaseAuth, getAttemptStatus);

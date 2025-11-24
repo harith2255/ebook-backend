@@ -61,7 +61,8 @@ export async function register(req, res) {
       },
     });
 
-  } catch (err) {
+  } catch (err) {console.log("Register Body:", req.body);
+
     console.error("Unexpected register error:", err);
     return res.status(500).json({ error: "Internal Server Error" });
   }

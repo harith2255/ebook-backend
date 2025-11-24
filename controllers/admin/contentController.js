@@ -22,6 +22,19 @@ export const uploadContent = async (req, res) => {
     const file = req.files?.file?.[0] || null;
     const cover = req.files?.cover?.[0] || null;
 
+
+    // --- Parse MCQs safely (for mock tests) ---
+let mcqs = [];
+try {
+  if (req.body.mcqs) {
+    mcqs = JSON.parse(req.body.mcqs);
+  }
+} catch (e) {
+  console.error("❌ Failed to parse MCQs:", e);
+  mcqs = [];
+}
+
+
     // ✅ FIXED VALIDATION
     if (!type || !title) {
       return res.status(400).json({ error: "type and title are required" });
@@ -140,6 +153,8 @@ export const uploadContent = async (req, res) => {
       };
     }
 
+
+
     if (table === "mock_tests") {
       insertObj = {
         title,
@@ -152,6 +167,7 @@ export const uploadContent = async (req, res) => {
         subject: req.body.subject || category || "General",
         difficulty: req.body.difficulty || "Medium",
         participants: 0,
+         mcqs,
       };
     }
 
@@ -229,48 +245,72 @@ export const deleteContent = async (req, res) => {
   try {
     const { type, id } = req.params;
 
+    console.log("🔥 Backend DELETE HIT:", { type, id });
+
     const table =
       type === "book" || type === "ebook" ? "ebooks" :
       type === "note" ? "notes" :
       type === "test" ? "mock_tests" : null;
 
-    if (!table) return res.status(400).json({ error: "Invalid type" });
+    console.log("📌 Resolved table:", table);
+
+    if (!table) {
+      console.log("❌ Invalid type received:", type);
+      return res.status(400).json({ error: "Invalid type" });
+    }
 
     // Prevent deleting mock_tests with existing attempts
     if (table === "mock_tests") {
+      console.log("🔍 Checking attempts for mock test:", id);
+
       const { data: attempts, error: attemptErr } = await supabase
         .from("mock_attempts")
         .select("id")
         .eq("test_id", id)
         .limit(1);
 
+      console.log("📌 Attempts Query Result:", { attempts, attemptErr });
+
       if (attemptErr) {
-        console.error("Check attempts error:", attemptErr);
+        console.error("❌ Check attempts error:", attemptErr);
         return res.status(400).json({ error: "Failed to check attempts" });
       }
 
       if (attempts && attempts.length > 0) {
+        console.log("⛔ Cannot delete mock test; attempts exist");
         return res.status(400).json({
           error: "Cannot delete this mock test because users have attempted it.",
         });
       }
     }
 
-    // Proceed delete
-    const { error } = await supabase.from(table).delete().eq("id", id);
+    console.log("🗑️ Attempting DELETE:", { table, id });
+
+    // Perform delete with count for debugging
+    const { data, error, count } = await supabase
+      .from(table)
+      .delete({ count: "exact" })
+      .eq("id", id);
+
+    console.log("🧪 Supabase DELETE Result:", { data, error, count });
 
     if (error) {
-      console.error("deleteContent supabase error:", error);
+      console.error("❌ Supabase delete error:", error);
       return res.status(400).json({ error: error.message || "Delete failed" });
     }
 
-    return res.json({ message: "Content deleted" });
+    if (count === 0) {
+      console.warn("⚠️ No rows deleted. Possible RLS block or wrong ID:", id);
+    }
+
+    return res.json({ message: "Content deleted", deleted: count });
 
   } catch (err) {
-    console.error("deleteContent error:", err);
+    console.error("🔥 deleteContent error (server crash):", err);
     return res.status(500).json({ error: "Server error deleting content" });
   }
 };
+
 
 
 /**
