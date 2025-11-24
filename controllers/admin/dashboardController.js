@@ -3,69 +3,49 @@ import supabase from "../../utils/supabaseClient.js";
 const formatMonth = (date) =>
   new Date(date).toLocaleString("en-US", { month: "short" });
 
-/* -------------------------------------------------------
-   🔥 Helper: Percentage Change
-   Returns clean value:
-   → +12.5
-   → -8.3
-   → 0
-------------------------------------------------------- */
 function percentChange(current, previous) {
   current = Number(current) || 0;
   previous = Number(previous) || 0;
-
   if (previous === 0) return 0;
-
   return Number((((current - previous) / previous) * 100).toFixed(1));
 }
 
-
-
 export const getAdminDashboard = async (req, res) => {
   try {
-/* ---------------------------------------------
-   REAL AUTH USERS
---------------------------------------------- */
-const {
-  data: { users },
-  error: authErr,
-} = await supabase.auth.admin.listUsers();
+    /* ---------------------------------------------
+       REAL USERS (FROM PROFILES — ALWAYS ACCURATE)
+    --------------------------------------------- */
+    const { data: profiles, error: profErr } = await supabase
+      .from("profiles")
+      .select("id, created_at");
 
-if (authErr) {
-  console.error("Auth fetch error:", authErr);
-  return res.status(500).json({ error: "Cannot load user count" });
-}
+    if (profErr) {
+      console.error("Profiles fetch error:", profErr);
+      return res.status(500).json({ error: "Cannot load user count" });
+    }
 
-const totalUsers = users.length;
-
-
-
-/* -------------------------------------------------------
-   ACTIVE SUBSCRIPTIONS (REAL DATA)
-------------------------------------------------------- */
-const nowISO = new Date().toISOString();
-
-const { count: activeSubs, error: activeErr } = await supabase
-  .from("user_subscriptions")
-  .select("*", { count: "exact", head: true })
-  .eq("status", "active")
-  .gte("expires_at", nowISO); // must not be expired
-
-if (activeErr) {
-  console.error("Active Subscriptions Error:", activeErr);
-}
-
-
+    const totalUsers = profiles.length;
 
     /* -------------------------------------------------------
-       3. BOOKS SOLD
+       ACTIVE SUBSCRIPTIONS
+    ------------------------------------------------------- */
+    const nowISO = new Date().toISOString();
+
+    const { count: activeSubs } = await supabase
+      .from("user_subscriptions")
+      .select("*", { count: "exact", head: true })
+      .eq("status", "active")
+      .gte("expires_at", nowISO);
+
+    /* -------------------------------------------------------
+       BOOKS SOLD
     ------------------------------------------------------- */
     const { count: booksSold } = await supabase
       .from("book_sales")
       .select("*", { count: "exact", head: true });
 
     /* -------------------------------------------------------
-       4. REVENUE MTD
+       REVENUE (MTD)
     ------------------------------------------------------- */
     const firstDay = new Date();
     firstDay.setDate(1);
@@ -79,7 +59,7 @@ if (activeErr) {
       revenueMonth?.reduce((s, r) => s + Number(r.amount), 0) || 0;
 
     /* -------------------------------------------------------
-       5. LAST 6 MONTHS REVENUE TREND
+       REVENUE TREND (LAST 6 MONTHS)
     ------------------------------------------------------- */
     const sixMonthsAgo = new Date();
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
@@ -90,40 +70,38 @@ if (activeErr) {
       .gte("created_at", sixMonthsAgo.toISOString());
 
     const revenueTrend = {};
-
     revRows?.forEach((r) => {
       const m = formatMonth(r.created_at);
       revenueTrend[m] = (revenueTrend[m] || 0) + Number(r.amount);
     });
 
     /* -------------------------------------------------------
-       6. USER SIGNUPS TREND (AUTH USERS)
+       USER SIGNUPS TREND (FROM PROFILES)
     ------------------------------------------------------- */
-const newUsers = users.filter(
-  (u) =>
-    u.created_at &&
-    new Date(u.created_at) >= sixMonthsAgo
-);
+    const recentProfiles = profiles.filter(
+      (p) => p.created_at && new Date(p.created_at) >= sixMonthsAgo
+    );
 
     const userGrowthTrend = {};
 
-    newUsers.forEach((u) => {
-  if (!u.created_at) return;
-  const m = formatMonth(u.created_at);
-  userGrowthTrend[m] = (userGrowthTrend[m] || 0) + 1;
-});
-
+    recentProfiles.forEach((u) => {
+      const m = formatMonth(u.created_at);
+      userGrowthTrend[m] = (userGrowthTrend[m] || 0) + 1;
+    });
 
     /* -------------------------------------------------------
-       7. SORT MONTHS FOR CHART
+       COMBINE TRENDS
     ------------------------------------------------------- */
     const months = [
-      ...new Set([...Object.keys(revenueTrend), ...Object.keys(userGrowthTrend)])
+      ...new Set([
+        ...Object.keys(revenueTrend),
+        ...Object.keys(userGrowthTrend),
+      ]),
     ];
 
     const monthOrder = [
       "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
 
     const sortedMonths = months.sort(
@@ -136,50 +114,26 @@ const newUsers = users.filter(
       users: userGrowthTrend[m] || 0,
     }));
 
-    
-  
-/* -------------------------------------------------------
-   8. CLEAN KPI % CHANGE CALCULATION (SAFE)
-------------------------------------------------------- */
-console.log("DEBUG KPI VALUES:");
-console.log("totalUsers:", totalUsers);
-console.log("activeSubs:", activeSubs);
-console.log("booksSold:", booksSold);
-console.log("revenueMTD:", revenueMTD);
+    /* -------------------------------------------------------
+       KPI PERCENTAGES
+    ------------------------------------------------------- */
+    const prevMonthKey =
+      sortedMonths.length >= 2
+        ? sortedMonths[sortedMonths.length - 2]
+        : null;
 
-console.log("TREND DATA:");
-console.log("sortedMonths:", sortedMonths);
-console.log("userGrowthTrend:", userGrowthTrend);
-console.log("revenueTrend:", revenueTrend);
+    const prevUsers = Number(userGrowthTrend[prevMonthKey] || 0);
+    const prevRevenue = Number(revenueTrend[prevMonthKey] || 0);
+    const prevBooks = booksSold > 1 ? booksSold - 1 : 1;
+    const prevSubs = activeSubs > 1 ? activeSubs - 1 : 1;
 
-
-/* =======================
-   SAFE KPI % CALCULATION
-========================== */
-
-// previous month key
-const prevMonthKey =
-  sortedMonths.length >= 2 ? sortedMonths[sortedMonths.length - 2] : null;
-
-// safe previous values
-const prevUsers = Number(userGrowthTrend[prevMonthKey] || 0);
-const prevRevenue = Number(revenueTrend[prevMonthKey] || 0);
-
-// fallback previous values (avoid division by zero)
-const prevBooks = booksSold > 1 ? booksSold - 1 : 1;
-const prevSubs = activeSubs > 1 ? activeSubs - 1 : 1;
-
-// final percentages
-const userGrowthPercent = percentChange(newUsers.length, prevUsers);
-const revenueGrowthPercent = percentChange(revenueMTD, prevRevenue);
-const booksGrowthPercent = percentChange(booksSold, prevBooks);
-const subsGrowthPercent = percentChange(activeSubs, prevSubs);
-
-
-
+    const userGrowthPercent = percentChange(recentProfiles.length, prevUsers);
+    const revenueGrowthPercent = percentChange(revenueMTD, prevRevenue);
+    const booksGrowthPercent = percentChange(booksSold, prevBooks);
+    const subsGrowthPercent = percentChange(activeSubs, prevSubs);
 
     /* -------------------------------------------------------
-       9. RECENT ACTIVITY
+       RECENT ACTIVITY
     ------------------------------------------------------- */
     const { data: recentActivity } = await supabase
       .from("activity_log")
@@ -188,7 +142,7 @@ const subsGrowthPercent = percentChange(activeSubs, prevSubs);
       .limit(20);
 
     /* -------------------------------------------------------
-       10. SEND FINAL RESPONSE
+       SEND RESPONSE
     ------------------------------------------------------- */
     return res.json({
       kpis: {
@@ -204,7 +158,6 @@ const subsGrowthPercent = percentChange(activeSubs, prevSubs);
       chartData,
       recentActivity,
     });
-
   } catch (error) {
     console.error("Dashboard error:", error);
     return res.status(500).json({ error: "Internal Server Error" });
