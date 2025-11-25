@@ -21,7 +21,8 @@ import {
   saveHighlight,
   deleteHighlight,
   getLastPage,
-  saveLastPage
+  saveLastPage,
+  saveStudySession
 } from "../controllers/libraryController.js";
 
 const router = express.Router();
@@ -36,9 +37,11 @@ router.get("/recent", getRecentBooks);
 router.get("/reading", getCurrentlyReading);
 router.get("/completed", getCompletedBooks);
 router.get("/search", searchLibrary);
-router.patch("/progress/:bookId", updateReadingProgress);
+router.put("/progress/:bookId", updateReadingProgress);
 router.post("/read/start", startReading);
-router.patch("/complete/:bookId", markBookCompleted);  
+router.put("/complete/:bookId", markBookCompleted);  
+router.post("/study-session", saveStudySession);
+
 
 // ----- 📄 Last Page Routes -----
 router.get("/lastpage/:bookId", getLastPage);
@@ -52,7 +55,7 @@ router.delete("/highlights/:id", deleteHighlight);
 // ----- 📂 Collection Routes -----
 router.post("/collections", createCollection);
 router.get("/collections", getAllCollections);
-router.get("/collections/:id", getCollectionBooks);
+router.get("/collections/:id/", getCollectionBooks);
 router.post("/collections/:id/add/:bookId", addBookToCollection);
 router.delete("/collections/:id/remove/:bookId", removeBookFromCollection);
 router.delete("/collections/:id", deleteCollection);

@@ -4,110 +4,110 @@ import supabase from "../utils/supabaseClient.js";
 /**
  * 📊 GET /api/dashboard
  * Fetch complete dashboard data for a student
+ *
+ * NOTE: Because `user_library` only has `added_at` and not `updated_at`,
+ * we use `added_at` when filtering for "books completed this month".
+ * This is a limitation — see the migration SQL below to add `completed_at`.
  */
 export async function getDashboardData(req, res) {
   try {
-    console.log("USER INSIDE BACKEND:", req.user);
-
     const userId = req.user?.id || req.user?.user_metadata?.app_user_id;
 
     if (!userId) {
       return res.status(401).json({ error: "Unauthorized: Missing userId" });
     }
 
-    /* --------------------
-       1️⃣ Books Completed
-    -------------------- */
-    console.log("STEP 1: Fetch books completed");
-    const { count: booksRead, error: booksError } = await supabase
-      .from("user_books")
+    // --------------------
+    // 1) Books Completed (total)
+    //    using user_library.progress === 100
+    // --------------------
+    const { count: booksReadCount, error: booksReadErr } = await supabase
+      .from("user_library")
       .select("*", { count: "exact", head: true })
       .eq("user_id", userId)
-      .eq("status", "completed");
+      .eq("progress", 100);
 
-    if (booksError) throw booksError;
+    if (booksReadErr) throw booksReadErr;
 
-    // Last 30 days
+    // --------------------
+    // 2) Books completed in last 30 days
+    //    Because there is no updated_at/completed_at we will filter by added_at
+    //    AND progress === 100. This is imperfect if users finish books added long ago.
+    // --------------------
     const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
 
-    console.log("STEP 2: Fetch books completed this month");
-    const { count: booksCompletedMonth, error: monthlyBooksError } =
+    const { count: booksCompletedMonthCount, error: booksMonthErr } =
       await supabase
-        .from("user_books")
+        .from("user_library")
         .select("*", { count: "exact", head: true })
         .eq("user_id", userId)
-        .eq("status", "completed")
-        .gte("updated_at", thirtyDaysAgo);
+        .eq("progress", 100)
+        .gte("added_at", thirtyDaysAgo);
 
-    if (monthlyBooksError) throw monthlyBooksError;
+    if (booksMonthErr) throw booksMonthErr;
 
-    /* -------------------
-        2️⃣ Tests completed
-    --------------------- */
-    console.log("STEP 3: Fetch test results");
-    const { data: testResults, count: testsCompleted, error: testsError } =
+    // --------------------
+    // 3) Tests completed & avg score
+    // --------------------
+    const { data: testResults = [], count: testsCompletedCount, error: testsErr } =
       await supabase
         .from("test_results")
         .select("*", { count: "exact" })
         .eq("user_id", userId);
 
-    if (testsError) throw testsError;
+    if (testsErr) throw testsErr;
 
     const avgScore =
-      testResults?.length > 0
+      testResults.length > 0
         ? (
-            testResults.reduce((sum, t) => sum + (t.score || 0), 0) /
+            testResults.reduce((sum, t) => sum + (Number(t.score) || 0), 0) /
             testResults.length
           ).toFixed(1)
         : 0;
 
-    /* -------------------
-        3️⃣ Study Hours
-    --------------------- */
-    console.log("STEP 4: Fetch study sessions");
-    const { data: studyData, error: studyError } = await supabase
+    // --------------------
+    // 4) Study Hours
+    // --------------------
+    const { data: studySessions = [], error: studyErr } = await supabase
       .from("study_sessions")
       .select("duration, created_at")
       .eq("user_id", userId);
 
-    if (studyError) throw studyError;
+    if (studyErr) throw studyErr;
 
-    const totalStudyHours =
-      studyData?.reduce((sum, s) => sum + (s.duration || 0), 0) || 0;
+    const totalStudyHours = Math.round(
+      (studySessions.reduce((sum, s) => sum + (Number(s.duration) || 0), 0) || 0)
+    );
 
     const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
 
-    const weeklyHours =
-      studyData
-        ?.filter((s) => s.created_at >= weekAgo)
-        ?.reduce((sum, s) => sum + (s.duration || 0), 0) || 0;
+    const weeklyHours = Math.round(
+      studySessions
+        .filter((s) => s.created_at >= weekAgo)
+        .reduce((sum, s) => sum + (Number(s.duration) || 0), 0) || 0
+    );
 
-    /* -------------------
-        4️⃣ Active Streak
-    --------------------- */
-    console.log("STEP 5: Fetch active streak");
-    const { data: streakData, error: streakError } = await supabase
+    // --------------------
+    // 5) Active Streak
+    // --------------------
+    const { data: streakData, error: streakErr } = await supabase
       .from("user_streaks")
       .select("streak_days")
       .eq("user_id", userId)
       .maybeSingle();
 
-    if (streakError && streakError.code !== "PGRST116")
-      throw streakError;
-
+    if (streakErr && streakErr.code !== "PGRST116") throw streakErr;
     const activeStreak = streakData?.streak_days || 0;
 
-    /* -------------------
-        5️⃣ Continue Reading (JOIN 🟢 Optimized)
-        NOTE: include file_url and pages for PDF viewer
-    --------------------- */
-    console.log("STEP 6: Fetch user_library rows (recent books) with file_url");
-    const { data: recentBooksRaw, error: recentBooksError } = await supabase
+    // --------------------
+    // 6) Continue Reading (recent books) — include last_page & progress
+    // --------------------
+    const { data: recentBooksRaw = [], error: recentBooksErr } = await supabase
       .from("user_library")
-      .select(
-        `
+      .select(`
         book_id,
         progress,
+        last_page,
         added_at,
         ebooks (
           id,
@@ -118,49 +118,44 @@ export async function getDashboardData(req, res) {
           file_url,
           pages
         )
-      `
-      )
+      `)
       .eq("user_id", userId)
       .order("added_at", { ascending: false })
-      .limit(3);
+      .limit(5);
 
-    if (recentBooksError) throw recentBooksError;
+    if (recentBooksErr) throw recentBooksErr;
 
-    // Safety: ensure each entry returns an `ebooks` object
-    // and provide a fallback cover_url if missing (uploaded local file path)
     const FALLBACK_COVER_PATH = "/mnt/data/397e2adf-175b-45d7-b8b0-a860b51d99a3.png";
 
     const recentBooks = (recentBooksRaw || []).map((row) => {
       const book = row?.ebooks || null;
-      if (book) {
-        // ensure file_url present (important for BookReader)
-        book.file_url = book.file_url || null;
-        book.cover_url = book.cover_url || FALLBACK_COVER_PATH;
-      }
       return {
-        ...row,
-        ebooks: book,
+        book_id: row.book_id,
+        last_page: row.last_page || 1,
+        progress: row.progress || 0,
+        added_at: row.added_at,
+        ebooks: {
+          ...book,
+          file_url: book?.file_url || null,
+          cover_url: book?.cover_url || FALLBACK_COVER_PATH,
+        },
       };
     });
 
-    /* -------------------
-        6️⃣ User Info
-    --------------------- */
-    console.log("STEP 7: Fetch user profile");
-    let { data: userData, error: userError } = await supabase
+    // --------------------
+    // 7) User profile (basic)
+    // --------------------
+    let { data: userData, error: userErr } = await supabase
       .from("profiles")
       .select("full_name, email")
       .eq("id", userId)
       .maybeSingle();
 
-    if (userError && userError.code !== "PGRST116")
-      throw userError;
+    if (userErr && userErr.code !== "PGRST116") throw userErr;
 
-    /* Auto-create missing profile */
     if (!userData) {
-      console.log("➡ No profile found. Creating new profile...");
-
-      const { data: newProfile, error: upsertError } = await supabase
+      // create a minimal profile if missing
+      const { data: newProfile, error: upsertErr } = await supabase
         .from("profiles")
         .upsert({
           id: userId,
@@ -172,39 +167,36 @@ export async function getDashboardData(req, res) {
         .select()
         .single();
 
-      if (upsertError) throw upsertError;
-
+      if (upsertErr) throw upsertErr;
       userData = newProfile;
     }
 
-    // FINAL RESPONSE:
+    // --------------------
+    // Final assembled response
+    // --------------------
     return res.json({
       user: userData,
       stats: {
-        booksRead: booksRead || 0,
-        booksThisMonth: booksCompletedMonth || 0,
-        testsCompleted: testsCompleted || 0,
-        avgScore: parseFloat(avgScore),
-        studyHours: Math.round(totalStudyHours),
-        weeklyHours: Math.round(weeklyHours),
-        activeStreak,
+        booksRead: booksReadCount || 0,
+        booksThisMonth: booksCompletedMonthCount || 0,
+        testsCompleted: testsCompletedCount || 0,
+        avgScore: parseFloat(avgScore) || 0,
+        studyHours: totalStudyHours || 0,
+        weeklyHours: weeklyHours || 0,
+        activeStreak: activeStreak || 0,
       },
       recentBooks,
       weeklyProgress: {
-        books: booksCompletedMonth || 0,
+        books: booksCompletedMonthCount || 0,
         tests:
           testResults?.filter(
             (t) => new Date(t.created_at) >= new Date(weekAgo)
           ).length || 0,
-        hours: Math.round(weeklyHours),
+        hours: weeklyHours || 0,
       },
     });
   } catch (err) {
     console.error("🔥 DASHBOARD ERROR:", err);
-    console.error("🔥 ERROR MESSAGE:", err?.message);
-    console.error("🔥 ERROR DETAILS:", err?.details);
-    console.error("🔥 ERROR HINT:", err?.hint);
-    console.error("🔥 ERROR CODE:", err?.code);
     return res.status(500).json({ error: "Failed to fetch dashboard data" });
   }
 }

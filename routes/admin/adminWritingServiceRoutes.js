@@ -5,6 +5,7 @@ import {
   acceptOrder,
   completeOrder,
   rejectOrder,
+  adminReply
 } from "../../controllers/admin/adminWritingServiceController.js";
 import { verifySupabaseAuth, adminOnly } from "../../middleware/authMiddleware.js";
 
@@ -21,13 +22,24 @@ router.put("/orders/:id/reject", verifySupabaseAuth, adminOnly, rejectOrder);
 import { uploadWritingFile } from "../../controllers/admin/adminWritingServiceController.js";
 import multer from "multer";
 
+const upload = multer({ storage: multer.memoryStorage() });
+
+
 router.post(
   "/upload",
   verifySupabaseAuth,
   adminOnly,
+  upload.single("file"),      // ← THIS WAS MISSING
   uploadWritingFile
 );
 
+
+router.post(
+  "/orders/reply",
+  verifySupabaseAuth,
+  adminOnly,
+  adminReply
+);
 
 
 export default router;

@@ -14,17 +14,19 @@ export const getUserLibrary = async (req, res) => {
       last_page,
       added_at,
       book_id,
-      ebooks:ebooks!inner (
-        id,
-        title,
-        author,
-        category,
-        description,
-        file_url,
-        pages,
-        price,
-        sales
-      )
+     ebooks: ebooks!inner (
+  id,
+  title,
+  author,
+  category,
+  description,
+  cover_url,
+  file_url,
+  pages,
+  price,
+  sales
+)
+
     `)
     .eq("user_id", userId);
 
@@ -102,6 +104,7 @@ export const getRecentBooks = async (req, res) => {
         author,
         category,
         description,
+        cover_url,
         file_url,
         pages,
         price,
@@ -134,6 +137,7 @@ export const getCurrentlyReading = async (req, res) => {
         author,
         category,
         description,
+        cover_url,
         file_url,
         pages,
         price,
@@ -141,8 +145,8 @@ export const getCurrentlyReading = async (req, res) => {
       )
     `)
     .eq("user_id", userId)
-    .lt("progress", 100)
-    .gt("progress", 0);
+    .gt("progress", 0)
+    .lt("progress", 100);
 
   if (error) return res.status(400).json({ error: error.message });
   res.json(data);
@@ -166,6 +170,7 @@ export const getCompletedBooks = async (req, res) => {
         author,
         category,
         description,
+        cover_url,
         file_url,
         pages,
         price,
@@ -199,6 +204,7 @@ export const searchLibrary = async (req, res) => {
           author,
           category,
           description,
+          cover_url,
           file_url,
           pages,
           price,
@@ -221,7 +227,7 @@ export const searchLibrary = async (req, res) => {
 };
 
 /* ============================================
-   📚 COLLECTIONS
+   📚 COLLECTIONS (Create, Read, Manage)
 ============================================ */
 export const createCollection = async (req, res) => {
   const userId = req.user.id;
@@ -253,23 +259,39 @@ export const getCollectionBooks = async (req, res) => {
   const { data, error } = await supabase
     .from("collection_books")
     .select(`
-      *,
-      ebooks (
+      book_id,
+      ebooks:ebooks (
         id,
         title,
         author,
         category,
         description,
+        cover_url,
         file_url,
         pages,
-        price,
-        sales
+        price
       )
     `)
     .eq("collection_id", id);
 
   if (error) return res.status(400).json({ error: error.message });
-  res.json(data);
+
+  // Flatten response so UI works
+  const formatted = data.map((item) => ({
+    id: item.ebooks.id,
+    title: item.ebooks.title,
+    author: item.ebooks.author,
+    category: item.ebooks.category,
+    description: item.ebooks.description,
+    cover_url: item.ebooks.cover_url,
+    file_url: item.ebooks.file_url,
+    pages: item.ebooks.pages,
+    price: item.ebooks.price,
+    progress: 0, // optional, library progress not stored here
+    purchased: null, // optional
+  }));
+
+  res.json(formatted);
 };
 
 export const addBookToCollection = async (req, res) => {
@@ -309,23 +331,70 @@ export const deleteCollection = async (req, res) => {
 };
 
 /* ============================================
-   📝 UPDATE READING PROGRESS
+   🔥 SMART UPDATE READING PROGRESS
 ============================================ */
 export const updateReadingProgress = async (req, res) => {
-  const userId = req.user.id;
-  const { bookId } = req.params;
-  const { progress } = req.body;
+  try {
+    const userId = req.user.id;
+    const { bookId } = req.params;
+    const { progress } = req.body;
 
-  const { error } = await supabase
-    .from("user_library")
-    .update({ progress })
-    .eq("user_id", userId)
-    .eq("book_id", bookId);
+    if (typeof progress !== "number") {
+      return res.status(400).json({ error: "Invalid 'progress' — expected number" });
+    }
 
-  if (error) return res.status(400).json({ error: error.message });
+    const now = new Date().toISOString();
 
-  res.json({ message: "Progress updated", progress });
+    // Only update allowed columns that exist in DB
+    const updates = {
+      progress,
+      completed_at: progress === 100 ? now : null
+    };
+
+    // Make sure the user_library row exists for this user & book
+    const { data: existing, error: selErr } = await supabase
+      .from("user_library")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("book_id", bookId)
+      .maybeSingle();
+
+    if (selErr) {
+      console.error("Supabase select error (updateReadingProgress):", selErr);
+      return res.status(500).json({ error: "Database error" });
+    }
+
+    if (!existing) {
+      return res.status(404).json({ error: "Library entry not found for this user/book" });
+    }
+
+    const { error } = await supabase
+      .from("user_library")
+      .update(updates)
+      .eq("user_id", userId)
+      .eq("book_id", bookId);
+
+    if (error) {
+      console.error("🔥 SUPABASE UPDATE ERROR (updateReadingProgress):", error);
+      return res.status(400).json({ error: error.message, details: error });
+    }
+
+    // If you have a global dashboard refresh, call it
+    globalThis.dispatchDashboardUpdate?.();
+
+    res.json({
+      message: "Progress updated",
+      progress,
+      completed: progress === 100,
+    });
+  } catch (err) {
+    console.error("updateReadingProgress error:", err);
+    res.status(500).json({ error: "Failed to update reading progress" });
+  }
 };
+
+
+
 
 /* ============================================
    📝 START READING
@@ -511,7 +580,10 @@ export const saveLastPage = async (req, res) => {
     res.status(500).json({ error: "Failed to save last page" });
   }
 };
-// Rename collection
+
+/* ============================================
+   ✏️ RENAME COLLECTION
+============================================ */
 export const renameCollection = async (req, res) => {
   const { id } = req.params;
   const { name } = req.body;
@@ -525,3 +597,29 @@ export const renameCollection = async (req, res) => {
 
   res.json({ message: "Collection renamed" });
 };
+
+/* ============================================
+   ⏱ SAVE STUDY SESSION
+============================================ */
+export const saveStudySession = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { duration } = req.body; // duration in HOURS
+
+    if (!duration || duration <= 0) {
+      return res.status(400).json({ error: "Invalid duration" });
+    }
+
+    const { error } = await supabase
+      .from("study_sessions")
+      .insert([{ user_id: userId, duration }]);
+
+    if (error) return res.status(400).json({ error: error.message });
+
+    res.json({ message: "Study session saved", duration });
+  } catch (err) {
+    console.error("saveStudySession error:", err);
+    res.status(500).json({ error: "Failed to save study session" });
+  }
+};
+

@@ -213,3 +213,66 @@ export const uploadWritingFile = async (req, res) => {
   });
 };
 
+export const adminReply = async (req, res) => {
+  try {
+    const adminId = req.user.id;
+    const adminName = req.user.user_metadata?.full_name || req.user.email;
+
+    const { order_id, message } = req.body;
+
+    if (!order_id || !message) {
+      return res.status(400).json({ error: "order_id and message are required" });
+    }
+
+    // Insert feedback message
+    const { error: feedbackError, data: feedbackData } = await supabase
+      .from("writing_feedback")
+      .insert([
+        {
+          order_id,
+          user_id: adminId,
+          user_name: adminName,
+          message,
+          sender: "admin",
+          created_at: new Date(),
+        },
+      ])
+      .select();
+
+    if (feedbackError) throw feedbackError;
+
+    // Get order user id (to notify them)
+    const { data: orderData, error: orderErr } = await supabase
+      .from("writing_orders")
+      .select("user_id")
+      .eq("id", order_id)
+      .single();
+
+    if (orderErr) throw orderErr;
+
+    const userId = orderData.user_id;
+
+    // Insert user notification
+    const { error: notifError } = await supabase
+      .from("user_notifications")
+      .insert([
+        {
+          user_id: userId,
+          title: "New Message From Admin",
+          message: `Admin replied to your writing order #${order_id}: "${message}"`,
+          created_at: new Date(),
+        },
+      ]);
+
+    if (notifError) throw notifError;
+
+    res.json({
+      message: "Reply sent & user notified",
+      feedback: feedbackData[0],
+    });
+
+  } catch (err) {
+    console.error("adminReply error:", err);
+    res.status(500).json({ error: "Reply failed" });
+  }
+};
