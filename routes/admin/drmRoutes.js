@@ -16,19 +16,34 @@ import {
 
 const router = express.Router();
 
-// ✅ DRM Settings
+// ----------------------------------------------------------
+//  SETTINGS
+// ----------------------------------------------------------
 router.get("/settings", verifySupabaseAuth, adminOnly, getDRMSettings);
 router.put("/settings", verifySupabaseAuth, adminOnly, updateDRMSettings);
 
-// ✅ Access Logs
-router.get("/logs", verifySupabaseAuth, adminOnly, getAccessLogs);
+// ----------------------------------------------------------
+//  ACCESS LOGS
+// ----------------------------------------------------------
+router.get("/access-logs", verifySupabaseAuth, adminOnly, getAccessLogs);
+// NOTE: Your frontend uses GET /api/drm/access-logs
+// So we keep the route as /access-logs
 
-// ✅ Quick Actions
+
+// ----------------------------------------------------------
+//  QUICK ACTIONS
+// ----------------------------------------------------------
 router.post("/watermark", verifySupabaseAuth, adminOnly, addWatermark);
+
 router.get("/licenses", verifySupabaseAuth, adminOnly, getActiveLicenses);
+// matches frontend: axios.get("/api/drm/licenses")
+
 router.post("/revoke", verifySupabaseAuth, adminOnly, revokeAccess);
 
-// ✅ Download Report
+
+// ----------------------------------------------------------
+//  REPORT DOWNLOAD
+// ----------------------------------------------------------
 router.get("/report", verifySupabaseAuth, adminOnly, downloadAccessReport);
 
 export default router;

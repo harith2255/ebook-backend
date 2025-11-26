@@ -190,3 +190,41 @@ export const purchaseBook = async (req, res) => {
     res.status(500).json({ error: "Failed to purchase book" });
   }
 };
+/**
+ * ✅ DRM: Log Book Read Event
+ */
+export const logBookRead = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const userName = req.user.full_name || req.user.email;
+    const { book_id } = req.body;
+
+    if (!book_id)
+      return res.status(400).json({ error: "book_id is required" });
+
+    // Fetch book title
+    const { data: book } = await supabase
+      .from("books")
+      .select("title")
+      .eq("id", book_id)
+      .single();
+
+    // Insert DRM log
+    await supabase.from("drm_access_logs").insert({
+      user_id: userId,
+      user_name: userName,
+      book_id,
+      book_title: book?.title || "Unknown",
+      action: "read",
+      device_info: req.headers["user-agent"],
+      ip_address: req.ip,
+      created_at: new Date()
+    });
+
+    return res.json({ message: "Read event logged" });
+
+  } catch (err) {
+    console.error("logBookRead error:", err);
+    return res.status(500).json({ error: "Failed to log read event" });
+  }
+};

@@ -7,7 +7,8 @@ import {
   getBookById,
   searchBooksByName,
   purchaseBook,
-  getPurchasedBooks
+  getPurchasedBooks,
+  logBookRead
 } from "../controllers/bookController.js";
 
 import { verifySupabaseAuth, adminOnly } from "../middleware/authMiddleware.js";
@@ -21,6 +22,7 @@ const router = express.Router();
 // Get all books
 // GET /api/books
 router.get("/", verifySupabaseAuth, getAllBooks);
+router.post("/read", verifySupabaseAuth, logBookRead);
 
 // Search books
 // GET /api/books/search?name=
