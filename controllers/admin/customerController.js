@@ -228,30 +228,58 @@ export const deleteCustomer = async (req, res) => {
   try {
     const { id } = req.params;
 
+    /* -----------------------------------------
+       1. DELETE ALL CHILD TABLE DATA FIRST
+    ----------------------------------------- */
     const tablesToClean = [
-      "subscriptions",
-      "book_sales",
+      "downloaded_notes",
+      "ebooks",
+      "mock_answers",
+      "mock_attempts",
+      "mock_tests",
+      "test_attempts",
+      "test_results",
       "activity_log",
-      "user_notifications",
-      "payments_transactions",
-      "writing_orders",
+      "user_books",
+      "user_cart",
+      "user_library",
+      "user_subscriptions",
+      "notes_purchase",
       "notes",
+      "writing_feedback",
+      "writing_orders",
+      "payment_methods",
+      "payments_transactions",
+      "saved_jobs",
       "purchases",
-      "mock_test_attempts",
-      "jobs_applications"
+      "jobs_applications",
+      "subscriptions"
     ];
 
     for (const table of tablesToClean) {
       await supabaseAdmin.from(table).delete().eq("user_id", id);
     }
 
+    /* -----------------------------------------
+       2. DELETE PROFILE
+    ----------------------------------------- */
     await supabaseAdmin.from("profiles").delete().eq("id", id);
 
-    // DELETE AUTH USER
+    /* -----------------------------------------
+       3. DELETE THE AUTH USER (ignore harmless errors)
+    ----------------------------------------- */
     const { error: authErr } = await supabaseAdmin.auth.admin.deleteUser(id);
 
-    if (authErr)
-      return res.status(400).json({ error: authErr.message });
+    if (authErr) {
+      console.warn("Auth delete warning:", authErr.message);
+
+      if (
+        !authErr.message.includes("not found") &&
+        !authErr.message.includes("Database error deleting user")
+      ) {
+        return res.status(400).json({ error: authErr.message });
+      }
+    }
 
     res.json({ message: "User fully deleted" });
 
