@@ -11,6 +11,7 @@ import {
   logBookRead
 } from "../controllers/bookController.js";
 
+import { drmCheck } from "../middleware/drmCheck.js";
 import { verifySupabaseAuth, adminOnly } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
@@ -20,28 +21,31 @@ const router = express.Router();
 -------------------------------- */
 
 // Get all books
-// GET /api/books
 router.get("/", verifySupabaseAuth, getAllBooks);
-router.post("/read", verifySupabaseAuth, logBookRead);
 
 // Search books
-// GET /api/books/search?name=
 router.get("/search", verifySupabaseAuth, searchBooksByName);
 
-// Get single book
-// GET /api/books/:id
-router.get("/:id", verifySupabaseAuth, getBookById);
+/*  
+  IMPORTANT:
+  Add drmCheck BEFORE reading a book.
+  This automatically:
+  ✔ checks subscription
+  ✔ checks device limits
+  ✔ logs access
+  ✔ returns DRM flags to frontend (copy disable, watermark)
+*/
+router.get("/:id", verifySupabaseAuth, drmCheck, getBookById);
+
+// User opened a book → log reading event (ALSO DRM)
+router.post("/read", verifySupabaseAuth, drmCheck, logBookRead);
 
 /* -------------------------------
    PURCHASE ROUTES
 -------------------------------- */
 
-// Purchase a book
-// POST /api/books/purchase
 router.post("/purchase", verifySupabaseAuth, purchaseBook);
 
-// Get all purchased books for logged-in user
-// GET /api/books/purchased/all
 router.get("/purchased/all", verifySupabaseAuth, getPurchasedBooks);
 
 /* -------------------------------

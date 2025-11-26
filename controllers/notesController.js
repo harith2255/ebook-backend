@@ -26,13 +26,34 @@ export const getAllNotes = async (req, res) => {
 };
 
 // ✅ Get single note
+// ✅ Get single note (DRM applied)
 export const getNoteById = async (req, res) => {
   try {
     const { id } = req.params;
-    const { data, error } = await supabase.from("notes").select("*").eq("id", id).single();
+
+    const { data: note, error } = await supabase
+      .from("notes")
+      .select("*")
+      .eq("id", id)
+      .single();
+
     if (error) throw error;
-    res.json(data);
+
+    // DRM is injected by drmCheck middleware
+    const drm = req.drm || {};
+
+    res.json({
+      note,
+      drm: {
+        copy_protection: drm.copy_protection,
+        watermarking: drm.watermarking,
+        screenshot_prevention: drm.screenshot_prevention,
+        device_limit: drm.device_limit
+      }
+    });
+
   } catch (err) {
+    console.error("getNoteById error:", err);
     res.status(404).json({ error: "Note not found" });
   }
 };
@@ -69,21 +90,22 @@ export const addNote = async (req, res) => {
 
 
 // ✅ Track downloads
+// ✅ Track downloads (DRM enforced)
 export const incrementDownloads = async (req, res) => {
   try {
     const userId = req.user.id;
     const { id } = req.params;
 
-    // 1️⃣ Fetch file URL
+    // Fetch file URL + title
     const { data: note, error: noteErr } = await supabase
       .from("notes")
-      .select("file_url")
+      .select("file_url, title")
       .eq("id", id)
       .single();
 
     if (noteErr) throw noteErr;
 
-    // 2️⃣ Insert into downloaded notes table
+    // Insert downloaded note entry
     await supabase
       .from("downloaded_notes")
       .insert({
@@ -91,13 +113,28 @@ export const incrementDownloads = async (req, res) => {
         note_id: Number(id)
       });
 
-    // 3️⃣ Return file URL to frontend
+    // Log DRM download
+    await supabase.from("drm_access_logs").insert({
+      user_id: userId,
+      user_name: req.user.email,
+      book_id: null,
+      book_title: null,
+      action: "download_note",
+      device_info: req.headers["user-agent"],
+      ip_address: req.ip,
+      created_at: new Date(),
+      note_id: Number(id),
+      note_title: note.title
+    });
+
+    // Return file URL to frontend
     return res.json({
       success: true,
       file_url: note.file_url
     });
 
   } catch (err) {
+    console.error("incrementDownloads error:", err);
     return res.status(400).json({ error: err.message });
   }
 };

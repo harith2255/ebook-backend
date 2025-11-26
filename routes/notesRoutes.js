@@ -10,23 +10,40 @@ import {
 } from "../controllers/notesController.js";
 
 import { verifySupabaseAuth } from "../middleware/authMiddleware.js";
+import { drmCheck } from "../middleware/drmCheck.js";
 
 const router = express.Router();
 
-
-// Public routes
+/* -------------------------------
+   PUBLIC ROUTES
+-------------------------------- */
 router.get("/", getAllNotes);
 router.get("/featured", getFeaturedNotes);
 
-// Protected routes
+/* -------------------------------
+   PROTECTED ROUTES
+-------------------------------- */
+
+// Check if user already purchased notes
 router.get("/purchase/check", verifySupabaseAuth, checkNotePurchase);
+
+// Purchase note
 router.post("/purchase", verifySupabaseAuth, purchaseNote);
-router.post("/:id/download", verifySupabaseAuth, incrementDownloads);
+
+// Download (APPLY DRM HERE)
+router.post("/:id/download", verifySupabaseAuth, drmCheck, incrementDownloads);
+
+// Get downloaded notes
 router.get("/downloaded", verifySupabaseAuth, getDownloadedNotes);
 
+/* ------------------------------------
+   IMPORTANT: APPLY DRM BEFORE READING 
+-------------------------------------- */
 
-// ❗ DYNAMIC ROUTE MUST BE LAST
-router.get("/:id", getNoteById);
+// Read/open a single note (APPLY DRM HERE)
+router.get("/:id", verifySupabaseAuth,  getNoteById);
+
+
+
 
 export default router;
-

@@ -193,38 +193,45 @@ export const purchaseBook = async (req, res) => {
 /**
  * ✅ DRM: Log Book Read Event
  */
+// Log when a user reads a book
 export const logBookRead = async (req, res) => {
   try {
-    const userId = req.user.id;
-    const userName = req.user.full_name || req.user.email;
+    const userId = req.user?.id;
     const { book_id } = req.body;
 
-    if (!book_id)
-      return res.status(400).json({ error: "book_id is required" });
+    if (!book_id) {
+      return res.status(400).json({ error: "book_id required" });
+    }
 
-    // Fetch book title
+    // Get user info
+    const { data: user } = await supabase
+      .from("profiles")
+      .select("full_name")
+      .eq("id", userId)
+      .single();
+
+    // Get book info
     const { data: book } = await supabase
       .from("books")
       .select("title")
       .eq("id", book_id)
       .single();
 
-    // Insert DRM log
     await supabase.from("drm_access_logs").insert({
       user_id: userId,
-      user_name: userName,
+      user_name: user?.full_name || "Unknown User",
       book_id,
-      book_title: book?.title || "Unknown",
+      book_title: book?.title || "Unknown Book",
       action: "read",
-      device_info: req.headers["user-agent"],
+      device_info: req.headers["user-agent"] || "Unknown Device",
       ip_address: req.ip,
-      created_at: new Date()
+      created_at: new Date(),
     });
 
-    return res.json({ message: "Read event logged" });
+    res.json({ message: "Read logged" });
 
   } catch (err) {
     console.error("logBookRead error:", err);
-    return res.status(500).json({ error: "Failed to log read event" });
+    res.status(500).json({ error: "Could not log read action" });
   }
 };

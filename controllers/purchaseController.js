@@ -104,3 +104,63 @@ export const checkPurchase = async (req, res) => {
     res.status(500).json({ error: "Error checking purchase" });
   }
 };
+export const purchaseNote = async (req, res) => {
+  try {
+    const { noteId } = req.body;
+    const userId = req.user.id;
+
+    if (!noteId) {
+      return res.status(400).json({ error: "Note ID required" });
+    }
+
+    // 1️⃣ Verify Note Exists
+    const { data: note, error: noteError } = await supabase
+      .from("notes")
+      .select("*")
+      .eq("id", noteId)
+      .single();
+
+    if (noteError || !note) {
+      return res.status(404).json({ error: "Note not found" });
+    }
+
+    // 2️⃣ Save Purchase
+    await supabase.from("note_sales").insert([
+      {
+        user_id: userId,
+        note_id: noteId,
+        purchased_at: new Date().toISOString()
+      }
+    ]);
+
+    // 3️⃣ Add to User Notes Library
+    const { data: exists } = await supabase
+      .from("user_notes")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("note_id", noteId)
+      .maybeSingle();
+
+    if (!exists) {
+      await supabase.from("user_notes").insert([
+        {
+          user_id: userId,
+          note_id: noteId,
+          added_at: new Date().toISOString()
+        }
+      ]);
+    }
+
+    // 4️⃣ Update downloads/sales
+    await supabase
+      .from("notes")
+      .update({ downloads: (note.downloads || 0) + 1 })
+      .eq("id", noteId);
+
+    res.json({ message: "Note purchased successfully" });
+
+  } catch (err) {
+    console.error("purchaseNote error:", err);
+    res.status(500).json({ error: "Server error purchasing note" });
+  }
+};
