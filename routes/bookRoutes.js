@@ -1,18 +1,14 @@
+// routes/bookRoutes.js
 import express from "express";
 import {
-  addBook,
-  updateBook,
-  deleteBook,
   getAllBooks,
   getBookById,
   searchBooksByName,
-  purchaseBook,
-  getPurchasedBooks,
   logBookRead
 } from "../controllers/bookController.js";
 
 import { drmCheck } from "../middleware/drmCheck.js";
-import { verifySupabaseAuth, adminOnly } from "../middleware/authMiddleware.js";
+import { verifySupabaseAuth } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
@@ -20,10 +16,10 @@ const router = express.Router();
    PUBLIC / USER ROUTES
 -------------------------------- */
 
-// Get all books
+// Get all books (with optional filters)
 router.get("/", verifySupabaseAuth, getAllBooks);
 
-// Search books
+// Search books by name
 router.get("/search", verifySupabaseAuth, searchBooksByName);
 
 /*  
@@ -40,20 +36,17 @@ router.get("/:id", verifySupabaseAuth, drmCheck, getBookById);
 // User opened a book → log reading event (ALSO DRM)
 router.post("/read", verifySupabaseAuth, drmCheck, logBookRead);
 
-/* -------------------------------
-   PURCHASE ROUTES
--------------------------------- */
-
-router.post("/purchase", verifySupabaseAuth, purchaseBook);
-
-router.get("/purchased/all", verifySupabaseAuth, getPurchasedBooks);
-
-/* -------------------------------
-   ADMIN ROUTES
--------------------------------- */
-
-router.post("/", verifySupabaseAuth, adminOnly, addBook);
-router.put("/:id", verifySupabaseAuth, adminOnly, updateBook);
-router.delete("/:id", verifySupabaseAuth, adminOnly, deleteBook);
+/* ============================
+   PURCHASE ROUTES MOVED
+   
+   All purchase-related endpoints have been moved to:
+   /api/purchase/*
+   
+   See purchaseRoutes.js for:
+   - POST /api/purchase (single book)
+   - POST /api/purchase/unified (cart)
+   - GET /api/purchase/check
+   - GET /api/purchase/books/all (purchased books)
+============================= */
 
 export default router;

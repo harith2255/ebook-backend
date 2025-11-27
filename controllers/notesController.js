@@ -1,36 +1,53 @@
 import supabase from "../utils/supabaseClient.js";
 
-// ✅ Get all notes (with filters)
+/* ============================
+   GET ALL NOTES
+============================= */
 export const getAllNotes = async (req, res) => {
   try {
+    const userId = req.user?.id || null; // user may be logged out
+
     const { category, search } = req.query;
 
-    let query = supabase.from("notes").select("*").order("created_at", { ascending: false });
+    let query = supabase
+      .from("notes")
+      .select("*, notes_purchase(id, user_id)")
+      .order("created_at", { ascending: false });
 
-    if (category && category !== "All") {
-      query = query.eq("category", category);
-    }
-
-    if (search) {
-      query = query.ilike("title", `%${search}%`);
-    }
+    if (category && category !== "All") query = query.eq("category", category);
+    if (search) query = query.ilike("title", `%${search}%`);
 
     const { data, error } = await query;
-
     if (error) throw error;
-    res.json(data);
+
+    const processed = data.map(note => ({
+      ...note,
+      isPurchased: note.notes_purchase?.some(p => p.user_id === userId) || false
+    }));
+
+    res.json(processed);
   } catch (err) {
-    console.error("❌ getAllNotes error:", err.message);
     res.status(500).json({ error: err.message });
   }
 };
 
-// ✅ Get single note
-// ✅ Get single note (DRM applied)
+/* ============================
+   GET NOTE BY ID + DRM + PURCHASE STATUS
+============================= */
 export const getNoteById = async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = req.user.id;
 
+    // Check if purchased
+    const { data: purchased } = await supabase
+      .from("notes_purchase")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("note_id", id)
+      .maybeSingle();
+
+    // Fetch note
     const { data: note, error } = await supabase
       .from("notes")
       .select("*")
@@ -39,11 +56,11 @@ export const getNoteById = async (req, res) => {
 
     if (error) throw error;
 
-    // DRM is injected by drmCheck middleware
     const drm = req.drm || {};
 
     res.json({
       note,
+      isPurchased: !!purchased,
       drm: {
         copy_protection: drm.copy_protection,
         watermarking: drm.watermarking,
@@ -51,191 +68,244 @@ export const getNoteById = async (req, res) => {
         device_limit: drm.device_limit
       }
     });
-
   } catch (err) {
-    console.error("getNoteById error:", err);
+    console.error("getNoteById error:", err.message);
     res.status(404).json({ error: "Note not found" });
   }
 };
 
-// ✅ Add new note (admin only)
-export const addNote = async (req, res) => {
-  try {
-    const { title, category, author, pages, downloads, rating, price, featured, file_url, preview_content } = req.body;
-
-    const { data, error } = await supabase
-      .from("notes")
-      .insert([
-        {
-          title,
-          category,
-          author,
-          pages,
-          downloads,
-          rating,
-          price,
-          featured,
-          file_url,
-          preview_content,
-        },
-      ])
-      .select();
-
-    if (error) throw error;
-    res.json({ message: "Note added successfully", note: data[0] });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-};
-
-
-// ✅ Track downloads
-// ✅ Track downloads (DRM enforced)
+/* ============================
+   DOWNLOAD NOTE (DRM)
+============================= */
 export const incrementDownloads = async (req, res) => {
   try {
     const userId = req.user.id;
     const { id } = req.params;
 
-    // Fetch file URL + title
-    const { data: note, error: noteErr } = await supabase
+    const { data: note } = await supabase
       .from("notes")
       .select("file_url, title")
       .eq("id", id)
       .single();
 
-    if (noteErr) throw noteErr;
-
-    // Insert downloaded note entry
-    await supabase
-      .from("downloaded_notes")
-      .insert({
-        user_id: userId,
-        note_id: Number(id)
-      });
-
-    // Log DRM download
-    await supabase.from("drm_access_logs").insert({
+    await supabase.from("downloaded_notes").insert({
       user_id: userId,
-      user_name: req.user.email,
-      book_id: null,
-      book_title: null,
-      action: "download_note",
-      device_info: req.headers["user-agent"],
-      ip_address: req.ip,
-      created_at: new Date(),
-      note_id: Number(id),
-      note_title: note.title
+      note_id: Number(id)
     });
 
-    // Return file URL to frontend
-    return res.json({
-      success: true,
-      file_url: note.file_url
-    });
-
+    res.json({ success: true, file_url: note.file_url });
   } catch (err) {
     console.error("incrementDownloads error:", err);
-    return res.status(400).json({ error: err.message });
+    res.status(400).json({ error: err.message });
   }
 };
 
+/* ============================
+   GET USER'S DOWNLOADED NOTES
+============================= */
 export const getDownloadedNotes = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from("downloaded_notes")
-      .select("id, downloaded_at, note:notes(id, title, category, file_url)")
+      .select("note:notes(id, title, category, file_url)")
+      .eq("user_id", userId);
+
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/* ============================
+   GET ALL PURCHASED NOTES (IDs)
+============================= */
+export const getPurchasedNotes = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // FIXED: changed from user_notes → notes_purchase
+    const { data, error } = await supabase
+      .from("notes_purchase")
+      .select("note_id")
       .eq("user_id", userId);
 
     if (error) throw error;
 
-    res.json(data);
+    res.json(data.map(n => n.note_id));
   } catch (err) {
+    console.error("getPurchasedNotes error:", err.message);
     res.status(500).json({ error: err.message });
   }
 };
-
-
-// ✅ Get featured notes
-export const getFeaturedNotes = async (req, res) => {
+/* =====================================================
+   GET HIGHLIGHTS FOR A NOTE (per user)
+===================================================== */
+export const getNoteHighlights = async (req, res) => {
   try {
+    const userId = req.user.id;
+    const noteId = req.params.id;
+
     const { data, error } = await supabase
-      .from("notes")
+      .from("notes_highlights")
       .select("*")
-      .eq("featured", true)
-      .order("rating", { ascending: false });
+      .eq("user_id", userId)
+      .eq("note_id", noteId)
+      .order("created_at", { ascending: true });
 
     if (error) throw error;
-    res.json(data);
+
+    res.json(data || []);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("getNoteHighlights error:", err.message);
+    res.status(500).json({ error: "Failed to load highlights" });
   }
 };
 
-// GET /api/notes/purchase/check?noteId=xxx
-export const checkNotePurchase = async (req, res) => {
+/* =====================================================
+   ADD A NEW HIGHLIGHT
+===================================================== */
+export const addNoteHighlight = async (req, res) => {
   try {
-    const userId = req.user.id;  // from JWT
-    const noteId = req.query.noteId;
+    const userId = req.user.id;
+    const {
+      note_id,
+      page,
+      x_pct,
+      y_pct,
+      w_pct,
+      h_pct,
+      color
+    } = req.body;
+
+    if (!note_id || !page) {
+      return res.status(400).json({ error: "note_id and page are required" });
+    }
 
     const { data, error } = await supabase
-      .from("notes_purchase")
-      .select("*")
+      .from("notes_highlights")
+      .insert({
+        user_id: userId,
+        note_id,
+        page,
+        x_pct,
+        y_pct,
+        w_pct,
+        h_pct,
+        color: color || "rgba(255,255,0,0.35)",
+        created_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.json(data);
+  } catch (err) {
+    console.error("addNoteHighlight error:", err.message);
+    res.status(500).json({ error: "Failed to add highlight" });
+  }
+};
+
+/* =====================================================
+   DELETE HIGHLIGHT
+===================================================== */
+export const deleteNoteHighlight = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const highlightId = req.params.id;
+
+    const { error } = await supabase
+      .from("notes_highlights")
+      .delete()
+      .eq("id", highlightId)
+      .eq("user_id", userId);
+
+    if (error) throw error;
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("deleteNoteHighlight error:", err.message);
+    res.status(500).json({ error: "Failed to delete highlight" });
+  }
+};
+
+/* =====================================================
+   GET LAST PAGE (per user)
+===================================================== */
+export const getNoteLastPage = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const noteId = req.params.id;
+
+    const { data, error } = await supabase
+      .from("notes_read_history")
+      .select("last_page")
       .eq("user_id", userId)
       .eq("note_id", noteId)
       .maybeSingle();
 
     if (error) throw error;
 
-    res.json({ purchased: !!data });
+    res.json(data || { last_page: 1 });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("getNoteLastPage error:", err.message);
+    res.status(500).json({ error: "Failed to get last page" });
   }
 };
-// POST /api/notes/purchase
-export const purchaseNote = async (req, res) => {
+
+/* =====================================================
+   SAVE LAST PAGE (auto-save every 500ms)
+===================================================== */
+export const saveNoteLastPage = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { noteId } = req.body;
+    const noteId = req.params.id;
+    const { last_page } = req.body;
 
-    console.log("➡ purchaseNote request:", { userId, noteId });
-
-    // First check if already purchased
-    const { data: existing, error: existingErr } = await supabase
-      .from("notes_purchase")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("note_id", Number(noteId))
-      .maybeSingle();
-
-    if (existing) {
-      return res.json({
-        success: true,
-        alreadyPurchased: true,
-        message: "Note already purchased"
-      });
+    if (!last_page) {
+      return res.status(400).json({ error: "last_page is required" });
     }
 
+    // Check if exists
+    const { data: exists } = await supabase
+      .from("notes_read_history")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("note_id", noteId)
+      .maybeSingle();
+
+    if (exists) {
+      // UPDATE
+      const { error } = await supabase
+        .from("notes_read_history")
+        .update({
+          last_page,
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", exists.id);
+
+      if (error) throw error;
+
+      return res.json({ success: true, last_page });
+    }
+
+    // INSERT NEW
     const { error } = await supabase
-      .from("notes_purchase")
+      .from("notes_read_history")
       .insert({
         user_id: userId,
-        note_id: Number(noteId),
-        purchased_at: new Date(),
+        note_id: noteId,
+        last_page,
+        updated_at: new Date().toISOString()
       });
 
     if (error) throw error;
 
-    return res.json({
-      success: true,
-      alreadyPurchased: false,
-      message: "Note purchased successfully"
-    });
-
+    res.json({ success: true, last_page });
   } catch (err) {
-    console.log("❌ purchaseNote crashed:", err);
-    return res.status(500).json({ error: err.message });
+    console.error("saveNoteLastPage error:", err.message);
+    res.status(500).json({ error: "Failed to save last page" });
   }
 };
-

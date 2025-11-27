@@ -1,166 +1,246 @@
 import supabase from "../utils/supabaseClient.js";
 
-// ---------------------------
-//  BUY A BOOK
-// ---------------------------
-
-
-// ---------------------------
-//  BUY A BOOK + ADD TO LIBRARY
-// ---------------------------
-
-
-export const purchaseBook = async (req, res) => {
+/* ============================
+   UNIFIED PURCHASE HANDLER
+============================= */
+export const unifiedPurchase = async (req, res) => {
   try {
-    const { bookId } = req.body;
     const userId = req.user.id;
+    const { items, type } = req.body;
 
-    if (!bookId) {
-      return res.status(400).json({ error: "Book ID required" });
+    if (!items && !type) {
+      return res.status(400).json({ error: "Purchase data required" });
     }
 
-    // 1️⃣ INSERT — book purchase history
-    await supabase.from("book_sales").insert([
-      {
-        user_id: userId,
-        book_id: bookId,
-        purchased_at: new Date().toISOString(),
-      }
-    ]);
+    const purchaseItems = items || [
+      type === "book"
+        ? { type: "book", id: req.body.bookId || req.body.book_id }
+        : { type: "note", id: req.body.noteId || req.body.note_id }
+    ];
 
-    // 2️⃣ INSERT — add to user library (PREVENT DUPLICATE)
-    const { data: exists } = await supabase
-      .from("user_library")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("book_id", bookId)
-      .maybeSingle();
+    const results = [];
+    const errors = [];
 
-    if (!exists) {
-      await supabase.from("user_library").insert([
-        {
-          user_id: userId,
-          book_id: bookId,
-          progress: 0,
-          added_at: new Date().toISOString(),
+    for (const item of purchaseItems) {
+      try {
+        if (item.type === "book") {
+          await processBookPurchase(userId, item.id);
+          results.push({ type: "book", id: item.id, success: true, isPurchased: true });
+        } else if (item.type === "note") {
+          await processNotePurchase(userId, item.id);
+          results.push({ type: "note", id: item.id, success: true, isPurchased: true });
         }
-      ]);
+      } catch (err) {
+        errors.push({ type: item.type, id: item.id, error: err.message });
+      }
     }
 
-    // 3️⃣ UPDATE book sales count (use "books" table)
-    const { data: book, error: fetchError } = await supabase
-      .from("ebooks")
-      .select("sales")
-      .eq("id", bookId)
-      .single();
-
-    if (fetchError) {
-      return res.status(500).json({ error: "Could not fetch sales" });
+    if (errors.length > 0) {
+      return res.status(207).json({
+        success: false,
+        message: "Some purchases failed",
+        results,
+        errors
+      });
     }
 
-    const newSales = (book?.sales || 0) + 1;
-
-    await supabase
-      .from("ebooks")
-      .update({ sales: newSales })
-      .eq("id", bookId);
-
-    res.json({ message: "Book purchased & saved to library" });
+    res.json({ success: true, results });
 
   } catch (err) {
-
-    console.error("purchaseBook error:", err);
-console.error("Supabase error details:", err?.message, err?.details);
-
-    res.status(500).json({ error: "Server error purchasing book" });
+    console.error("unifiedPurchase error:", err);
+    res.status(500).json({ error: "Server error processing purchase" });
   }
 };
 
+/* ============================
+   PROCESS BOOK PURCHASE
+============================= */
+async function processBookPurchase(userId, bookId) {
+  if (!bookId) throw new Error("Book ID is required");
 
+  const { data: exists } = await supabase
+    .from("book_sales")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("book_id", bookId)
+    .maybeSingle();
 
+  if (exists) return { alreadyPurchased: true };
 
+  const { error } = await supabase
+    .from("book_sales")
+    .insert({
+      user_id: userId,
+      book_id: bookId,
+      purchased_at: new Date().toISOString()
+    });
 
+  if (error) throw error;
 
-// ---------------------------
-//  CHECK IF USER PURCHASED
-// ---------------------------
-export const checkPurchase = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const { bookId } = req.query;
+  return { success: true };
+}
 
-    const { data } = await supabase
-      .from("book_sales")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("book_id", bookId)
-      .maybeSingle();
+/* ============================
+   PROCESS NOTE PURCHASE
+============================= */
+async function processNotePurchase(userId, noteId) {
+  if (!noteId) throw new Error("Note ID is required");
 
-    res.json({ purchased: !!data });
+  const { data: exists } = await supabase
+    .from("notes_purchase")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("note_id", noteId)
+    .maybeSingle();
 
-  } catch (err) {
-    console.error("checkPurchase error:", err);
-    console.error("Supabase error details:", err?.message, err?.details);
-    res.status(500).json({ error: "Error checking purchase" });
-  }
-};
+  if (exists) return { alreadyPurchased: true };
+
+  const { error } = await supabase
+    .from("notes_purchase")
+    .insert({
+      user_id: userId,
+      note_id: noteId,
+      purchased_at: new Date().toISOString()
+    });
+
+  if (error) throw error;
+
+  return { success: true };
+}
+
+/* ============================
+   LEGACY NOTE PURCHASE
+============================= */
 export const purchaseNote = async (req, res) => {
   try {
-    const { noteId } = req.body;
     const userId = req.user.id;
+    const effectiveNoteId = req.body.noteId || req.body.note_id;
 
-    if (!noteId) {
+    if (!effectiveNoteId) {
       return res.status(400).json({ error: "Note ID required" });
     }
 
-    // 1️⃣ Verify Note Exists
-    const { data: note, error: noteError } = await supabase
-      .from("notes")
-      .select("*")
-      .eq("id", noteId)
-      .single();
-
-    if (noteError || !note) {
-      return res.status(404).json({ error: "Note not found" });
-    }
-
-    // 2️⃣ Save Purchase
-    await supabase.from("note_sales").insert([
-      {
-        user_id: userId,
-        note_id: noteId,
-        purchased_at: new Date().toISOString()
-      }
-    ]);
-
-    // 3️⃣ Add to User Notes Library
     const { data: exists } = await supabase
-      .from("user_notes")
+      .from("notes_purchase")
       .select("id")
       .eq("user_id", userId)
-      .eq("note_id", noteId)
+      .eq("note_id", effectiveNoteId)
       .maybeSingle();
 
-    if (!exists) {
-      await supabase.from("user_notes").insert([
-        {
-          user_id: userId,
-          note_id: noteId,
-          added_at: new Date().toISOString()
-        }
-      ]);
+    if (exists) {
+      return res.json({
+        success: true,
+        isPurchased: true,
+        message: "Note already purchased"
+      });
     }
 
-    // 4️⃣ Update downloads/sales
-    await supabase
-      .from("notes")
-      .update({ downloads: (note.downloads || 0) + 1 })
-      .eq("id", noteId);
+    await supabase.from("notes_purchase").insert({
+      user_id: userId,
+      note_id: effectiveNoteId,
+      purchased_at: new Date().toISOString()
+    });
 
-    res.json({ message: "Note purchased successfully" });
+    res.json({
+      success: true,
+      isPurchased: true,
+      message: "Note purchased successfully"
+    });
 
   } catch (err) {
     console.error("purchaseNote error:", err);
     res.status(500).json({ error: "Server error purchasing note" });
+  }
+};
+
+/* ============================
+   CHECK PURCHASE STATUS
+============================= */
+export const checkPurchase = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const effectiveNoteId = req.query.noteId || req.query.note_id;
+    const effectiveBookId = req.query.bookId || req.query.book_id;
+
+    if (req.query.type === "note" || effectiveNoteId) {
+      const { data } = await supabase
+        .from("notes_purchase")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("note_id", effectiveNoteId)
+        .maybeSingle();
+
+      return res.json({ purchased: !!data });
+    }
+
+    if (req.query.type === "book" || effectiveBookId) {
+      const { data } = await supabase
+        .from("book_sales")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("book_id", effectiveBookId)
+        .maybeSingle();
+
+      return res.json({ purchased: !!data });
+    }
+
+    res.status(400).json({ error: "bookId or noteId required" });
+
+  } catch (err) {
+    console.error("checkPurchase error:", err);
+    res.status(500).json({ error: "Error checking purchase" });
+  }
+};
+
+/* ============================
+   GET PURCHASED BOOKS
+============================= */
+export const getPurchasedBooks = async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("book_sales")
+      .select("ebooks(*)")
+      .eq("user_id", req.user.id);
+
+    if (error) throw error;
+
+    res.json(data.map(item => item.ebooks));
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/* ============================
+   GET PURCHASED BOOK IDS
+============================= */
+export const getPurchasedBookIds = async (req, res) => {
+  try {
+    const { data } = await supabase
+      .from("book_sales")
+      .select("book_id")
+      .eq("user_id", req.user.id);
+
+    res.json(data.map(b => b.book_id));
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/* ============================
+   GET PURCHASED NOTE IDS
+============================= */
+export const getPurchasedNoteIds = async (req, res) => {
+  try {
+    const { data } = await supabase
+      .from("notes_purchase")
+      .select("note_id")
+      .eq("user_id", req.user.id);
+
+    res.json(data.map(n => n.note_id));
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 };
