@@ -5,31 +5,27 @@ import supabase from "../utils/supabaseClient.js";
 ============================= */
 export const getAllNotes = async (req, res) => {
   try {
-    const userId = req.user?.id || null; // user may be logged out
-
     const { category, search } = req.query;
 
     let query = supabase
       .from("notes")
-      .select("*, notes_purchase(id, user_id)")
+      .select("*")
       .order("created_at", { ascending: false });
 
     if (category && category !== "All") query = query.eq("category", category);
     if (search) query = query.ilike("title", `%${search}%`);
 
     const { data, error } = await query;
+
     if (error) throw error;
 
-    const processed = data.map(note => ({
-      ...note,
-      isPurchased: note.notes_purchase?.some(p => p.user_id === userId) || false
-    }));
-
-    res.json(processed);
+    res.json(data);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("getAllNotes error:", err);
+    res.status(500).json({ error: "Failed to fetch notes" });
   }
 };
+
 
 /* ============================
    GET NOTE BY ID + DRM + PURCHASE STATUS

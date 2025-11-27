@@ -31,7 +31,7 @@ router.get("/search", verifySupabaseAuth, searchBooksByName);
   ✔ logs access
   ✔ returns DRM flags to frontend (copy disable, watermark)
 */
-router.get("/:id", verifySupabaseAuth, drmCheck, getBookById);
+router.get("/:id", verifySupabaseAuth,  getBookById);
 
 // User opened a book → log reading event (ALSO DRM)
 router.post("/read", verifySupabaseAuth, drmCheck, logBookRead);
