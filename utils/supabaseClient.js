@@ -14,6 +14,11 @@ export const supabasePublic = createClient(
       persistSession: false,
       detectSessionInUrl: false,
     },
+    global: {
+      headers: {
+        Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}`,
+      },
+    },
   }
 );
 

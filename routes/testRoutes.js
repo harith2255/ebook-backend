@@ -2,17 +2,21 @@ import express from "express";
 import { verifySupabaseAuth } from "../middleware/authMiddleware.js";
 import {
   startTest,
-  getQuestions,
+  getQuestions, // (Not used, but keeping import)
   saveAnswer,
   finishTest,
-  getAttemptStatus
+  getAttemptStatus,
 } from "../controllers/testController.js";
 
 const router = express.Router();
 
-router.post("/start", verifySupabaseAuth, startTest);
-router.post("/save-answer", verifySupabaseAuth, saveAnswer);
-router.post("/finish", verifySupabaseAuth, finishTest);
-router.get("/attempt/:attempt_id", verifySupabaseAuth, getAttemptStatus);
+router.post("/start", verifySupabaseAuth.required, startTest);
+router.post("/save-answer", verifySupabaseAuth.required, saveAnswer);
+router.post("/finish", verifySupabaseAuth.required, finishTest);
+router.get(
+  "/attempt/:attempt_id",
+  verifySupabaseAuth.required,
+  getAttemptStatus
+);
 
 export default router;

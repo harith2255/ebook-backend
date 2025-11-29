@@ -1,25 +1,23 @@
 import express from "express";
-import { 
+import {
   getAllJobs,
   getFilteredJobs,
   saveJob,
   getSavedJobs,
-  applyToJob
+  applyToJob,
 } from "../controllers/jobController.js";
+
 import { verifySupabaseAuth } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-// Public
+// ----- PUBLIC ROUTES -----
 router.get("/", getAllJobs);
 router.get("/filter", getFilteredJobs);
 
-// Protected
-router.post("/save", verifySupabaseAuth, saveJob);
-router.get("/saved", verifySupabaseAuth, getSavedJobs);
-router.post("/apply", verifySupabaseAuth, applyToJob);
-
-
-
+// ----- PROTECTED ROUTES -----
+router.post("/save", verifySupabaseAuth.required, saveJob);
+router.get("/saved", verifySupabaseAuth.required, getSavedJobs);
+router.post("/apply", verifySupabaseAuth.required, applyToJob);
 
 export default router;

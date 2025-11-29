@@ -6,15 +6,23 @@ import {
   getCart,
   addToCart,
   removeCartItem,
-  removePurchasedCartItems
+  removePurchasedCartItems,
 } from "../controllers/cartController.js";
 
 const router = express.Router();
 
 /* ROUTES */
-router.get("/", verifySupabaseAuth, getCart);
-router.post("/add", verifySupabaseAuth, addToCart);
-router.delete("/:id", verifySupabaseAuth, removeCartItem);
+router.get("/", verifySupabaseAuth.required, getCart);
+
+router.post("/add", verifySupabaseAuth.required, addToCart);
+
+router.delete("/:id", verifySupabaseAuth.required, removeCartItem);
+
 // DELETE /api/cart/remove-purchased
-router.delete("/remove-purchased", verifySupabaseAuth, removePurchasedCartItems);
+router.delete(
+  "/remove-purchased",
+  verifySupabaseAuth.required,
+  removePurchasedCartItems
+);
+
 export default router;

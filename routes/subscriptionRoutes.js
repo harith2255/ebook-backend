@@ -1,11 +1,23 @@
 import express from "express";
-import { getPlans, getActiveSubscription, upgradeSubscription } from "../controllers/subscriptionController.js";
+import {
+  getPlans,
+  getActiveSubscription,
+  upgradeSubscription,
+  getSinglePlan,
+  cancelSubscription,
+} from "../controllers/subscriptionController.js";
+
 import { verifySupabaseAuth } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
+// Public
 router.get("/plans", getPlans);
-router.get("/active", verifySupabaseAuth, getActiveSubscription);
-router.post("/upgrade", verifySupabaseAuth, upgradeSubscription);
+router.get("/:id", getSinglePlan);
+
+// Protected
+router.get("/active", verifySupabaseAuth.required, getActiveSubscription);
+router.post("/upgrade", verifySupabaseAuth.required, upgradeSubscription);
+router.post("/cancel", verifySupabaseAuth.required, cancelSubscription);
 
 export default router;

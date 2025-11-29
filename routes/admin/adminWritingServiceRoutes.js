@@ -5,41 +5,66 @@ import {
   acceptOrder,
   completeOrder,
   rejectOrder,
-  adminReply
+  adminReply,
+  uploadWritingFile,
 } from "../../controllers/admin/adminWritingServiceController.js";
-import { verifySupabaseAuth, adminOnly } from "../../middleware/authMiddleware.js";
 
-const router = express.Router();
-
-// Always: verifySupabaseAuth → adminOnly → controller
-router.get("/orders", verifySupabaseAuth, adminOnly, getAllOrders);
-router.get("/orders/pending", verifySupabaseAuth, adminOnly, getPendingOrders);
-router.put("/orders/:id/accept", verifySupabaseAuth, adminOnly, acceptOrder);
-router.put("/orders/:id/complete", verifySupabaseAuth, adminOnly, completeOrder);
-router.put("/orders/:id/reject", verifySupabaseAuth, adminOnly, rejectOrder);
-
-
-import { uploadWritingFile } from "../../controllers/admin/adminWritingServiceController.js";
-import multer from "multer";
-
-const upload = multer({ storage: multer.memoryStorage() });
-
-
-router.post(
-  "/upload",
+import {
   verifySupabaseAuth,
   adminOnly,
-  upload.single("file"),      // ← THIS WAS MISSING
+} from "../../middleware/authMiddleware.js";
+import multer from "multer";
+
+const router = express.Router();
+const upload = multer({ storage: multer.memoryStorage() });
+
+// Always: verifySupabaseAuth → adminOnly → controller
+
+router.get("/orders", verifySupabaseAuth.required, adminOnly, getAllOrders);
+
+router.get(
+  "/orders/pending",
+  verifySupabaseAuth.required,
+  adminOnly,
+  getPendingOrders
+);
+
+router.put(
+  "/orders/:id/accept",
+  verifySupabaseAuth.required,
+  adminOnly,
+  acceptOrder
+);
+
+router.put(
+  "/orders/:id/complete",
+  verifySupabaseAuth.required,
+  adminOnly,
+  completeOrder
+);
+
+router.put(
+  "/orders/:id/reject",
+  verifySupabaseAuth.required,
+  adminOnly,
+  rejectOrder
+);
+
+// Upload files for writing service
+router.post(
+  "/upload",
+  verifySupabaseAuth.required,
+  adminOnly,
+  upload.single("file"),
   uploadWritingFile
 );
 
-
+// Admin replies to user
 router.post(
   "/orders/reply",
-  verifySupabaseAuth,
+  verifySupabaseAuth.required,
   adminOnly,
   adminReply
 );
-
 
 export default router;

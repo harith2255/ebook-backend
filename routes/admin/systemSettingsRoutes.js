@@ -4,20 +4,32 @@ import {
   updateSystemSettings,
   getIntegrations,
   updateIntegration,
-  createBackup
+  createBackup,
 } from "../../controllers/admin/systemSettingsController.js";
 
-import { verifySupabaseAuth, adminOnly } from "../../middleware/authMiddleware.js";
+import {
+  verifySupabaseAuth,
+  adminOnly,
+} from "../../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-router.get("/", verifySupabaseAuth, adminOnly, getSystemSettings);
-router.put("/", verifySupabaseAuth, adminOnly, updateSystemSettings);
+router.get("/", verifySupabaseAuth.required, adminOnly, getSystemSettings);
+router.put("/", verifySupabaseAuth.required, adminOnly, updateSystemSettings);
 
-router.get("/integrations", verifySupabaseAuth, adminOnly, getIntegrations);
-router.put("/integrations/:id", verifySupabaseAuth, adminOnly, updateIntegration);
+router.get(
+  "/integrations",
+  verifySupabaseAuth.required,
+  adminOnly,
+  getIntegrations
+);
+router.put(
+  "/integrations/:id",
+  verifySupabaseAuth.required,
+  adminOnly,
+  updateIntegration
+);
 
-
-router.post("/backup", verifySupabaseAuth, adminOnly, createBackup);
+router.post("/backup", verifySupabaseAuth.required, adminOnly, createBackup);
 
 export default router;

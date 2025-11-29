@@ -9,8 +9,7 @@ import {
   getFeedbackForOrder,
   uploadUserAttachment,
   getSingleWritingOrder,
-  checkoutWritingOrder
-
+  checkoutWritingOrder,
 } from "../controllers/writingController.js";
 
 import { verifySupabaseAuth } from "../middleware/authMiddleware.js";
@@ -21,7 +20,7 @@ const router = express.Router();
 router.get("/services", getServices);
 
 // ---------- AUTH REQUIRED ----------
-router.use(verifySupabaseAuth);
+router.use(verifySupabaseAuth.required);
 
 // User routes
 router.post("/order", placeOrder);
@@ -31,8 +30,9 @@ router.put("/orders/:id", updateOrder);
 router.post("/feedback", sendFeedback);
 router.get("/feedback/:order_id", getFeedbackForOrder);
 router.post("/upload", uploadUserAttachment);
-router.get("/order/:id", verifySupabaseAuth, getSingleWritingOrder);
-router.post("/checkout", verifySupabaseAuth, checkoutWritingOrder);
 
+// These already under router.use(required), but keeping required for clarity
+router.get("/order/:id", verifySupabaseAuth.required, getSingleWritingOrder);
+router.post("/checkout", verifySupabaseAuth.required, checkoutWritingOrder);
 
 export default router;

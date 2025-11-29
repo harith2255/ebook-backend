@@ -6,12 +6,12 @@ import {
   addWatermark,
   getActiveLicenses,
   revokeAccess,
-  downloadAccessReport
+  downloadAccessReport,
 } from "../../controllers/admin/drmController.js";
 
 import {
   verifySupabaseAuth,
-  adminOnly
+  adminOnly,
 } from "../../middleware/authMiddleware.js";
 
 const router = express.Router();
@@ -19,31 +19,46 @@ const router = express.Router();
 // ----------------------------------------------------------
 //  SETTINGS
 // ----------------------------------------------------------
-router.get("/settings", verifySupabaseAuth, adminOnly, getDRMSettings);
-router.put("/settings", verifySupabaseAuth, adminOnly, updateDRMSettings);
+router.get("/settings", verifySupabaseAuth.required, adminOnly, getDRMSettings);
+router.put(
+  "/settings",
+  verifySupabaseAuth.required,
+  adminOnly,
+  updateDRMSettings
+);
 
 // ----------------------------------------------------------
 //  ACCESS LOGS
 // ----------------------------------------------------------
-router.get("/access-logs", verifySupabaseAuth, adminOnly, getAccessLogs);
-// NOTE: Your frontend uses GET /api/drm/access-logs
-// So we keep the route as /access-logs
-
+router.get(
+  "/access-logs",
+  verifySupabaseAuth.required,
+  adminOnly,
+  getAccessLogs
+);
 
 // ----------------------------------------------------------
 //  QUICK ACTIONS
 // ----------------------------------------------------------
-router.post("/watermark", verifySupabaseAuth, adminOnly, addWatermark);
+router.post("/watermark", verifySupabaseAuth.required, adminOnly, addWatermark);
 
-router.get("/licenses", verifySupabaseAuth, adminOnly, getActiveLicenses);
-// matches frontend: axios.get("/api/drm/licenses")
+router.get(
+  "/licenses",
+  verifySupabaseAuth.required,
+  adminOnly,
+  getActiveLicenses
+);
 
-router.post("/revoke", verifySupabaseAuth, adminOnly, revokeAccess);
-
+router.post("/revoke", verifySupabaseAuth.required, adminOnly, revokeAccess);
 
 // ----------------------------------------------------------
 //  REPORT DOWNLOAD
 // ----------------------------------------------------------
-router.get("/report", verifySupabaseAuth, adminOnly, downloadAccessReport);
+router.get(
+  "/report",
+  verifySupabaseAuth.required,
+  adminOnly,
+  downloadAccessReport
+);
 
 export default router;

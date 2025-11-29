@@ -5,7 +5,7 @@ import { getDashboardData } from "../controllers/dashBoardController.js";
 const router = express.Router();
 
 // Require login
-router.use(verifySupabaseAuth);
+router.use(verifySupabaseAuth.required);
 
 // GET dashboard info
 router.get("/", getDashboardData);

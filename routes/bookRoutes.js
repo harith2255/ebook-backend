@@ -4,7 +4,7 @@ import {
   getAllBooks,
   getBookById,
   searchBooksByName,
-  logBookRead
+  logBookRead,
 } from "../controllers/bookController.js";
 
 import { drmCheck } from "../middleware/drmCheck.js";
@@ -16,37 +16,23 @@ const router = express.Router();
    PUBLIC / USER ROUTES
 -------------------------------- */
 
-// Get all books (with optional filters)
-router.get("/", verifySupabaseAuth, getAllBooks);
+// Get all books (requires user login)
+router.get("/", verifySupabaseAuth.required, getAllBooks);
 
-// Search books by name
-router.get("/search", verifySupabaseAuth, searchBooksByName);
+// Search books by name (requires login)
+router.get("/search", verifySupabaseAuth.required, searchBooksByName);
 
-/*  
+/*
   IMPORTANT:
-  Add drmCheck BEFORE reading a book.
-  This automatically:
+  drmCheck BEFORE reading a book.
   ✔ checks subscription
   ✔ checks device limits
   ✔ logs access
-  ✔ returns DRM flags to frontend (copy disable, watermark)
+  ✔ returns DRM flags to frontend
 */
-router.get("/:id", verifySupabaseAuth,  getBookById);
+router.get("/:id", verifySupabaseAuth.optional, getBookById);
 
-// User opened a book → log reading event (ALSO DRM)
-router.post("/read", verifySupabaseAuth, drmCheck, logBookRead);
-
-/* ============================
-   PURCHASE ROUTES MOVED
-   
-   All purchase-related endpoints have been moved to:
-   /api/purchase/*
-   
-   See purchaseRoutes.js for:
-   - POST /api/purchase (single book)
-   - POST /api/purchase/unified (cart)
-   - GET /api/purchase/check
-   - GET /api/purchase/books/all (purchased books)
-============================= */
+// Log a book reading event
+router.post("/read", verifySupabaseAuth.required, drmCheck, logBookRead);
 
 export default router;

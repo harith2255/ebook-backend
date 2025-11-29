@@ -22,15 +22,15 @@ const upload = multer({ storage: multer.memoryStorage() });
 /* -------------------------------------------------------------------------- */
 /* 📌 USER PROFILE                                                             */
 /* -------------------------------------------------------------------------- */
-router.get("/", verifySupabaseAuth, getUserProfile);
-router.put("/", verifySupabaseAuth, updateUserProfile);
+router.get("/", verifySupabaseAuth.required, getUserProfile);
+router.put("/", verifySupabaseAuth.required, updateUserProfile);
 
 /* -------------------------------------------------------------------------- */
 /* 🖼️ AVATAR UPLOAD                                                            */
 /* -------------------------------------------------------------------------- */
 router.post(
   "/avatar",
-  verifySupabaseAuth,
+  verifySupabaseAuth.required,
   upload.single("avatar"),
   uploadAvatar
 );
@@ -38,23 +38,23 @@ router.post(
 /* -------------------------------------------------------------------------- */
 /* 🔐 SECURITY                                                                 */
 /* -------------------------------------------------------------------------- */
-router.put("/security/password", verifySupabaseAuth, changePassword);
-router.put("/security/2fa", verifySupabaseAuth, toggleTwoFactor);
+router.put("/security/password", verifySupabaseAuth.required, changePassword);
+router.put("/security/2fa", verifySupabaseAuth.required, toggleTwoFactor);
 
 /* -------------------------------------------------------------------------- */
 /* 🎨 PREFERENCES                                                              */
 /* -------------------------------------------------------------------------- */
-router.put("/preferences", verifySupabaseAuth, updatePreferences);
+router.put("/preferences", verifySupabaseAuth.required, updatePreferences);
 
 /* -------------------------------------------------------------------------- */
 /* 🔔 NOTIFICATIONS                                                            */
 /* -------------------------------------------------------------------------- */
-router.put("/notifications", verifySupabaseAuth, updateNotifications);
+router.put("/notifications", verifySupabaseAuth.required, updateNotifications);
 
 /* -------------------------------------------------------------------------- */
 /* 🖥️ SESSIONS                                                                 */
 /* -------------------------------------------------------------------------- */
-router.get("/sessions", verifySupabaseAuth, getSessions);
-router.delete("/sessions/:id", verifySupabaseAuth, revokeSession);
+router.get("/sessions", verifySupabaseAuth.required, getSessions);
+router.delete("/sessions/:id", verifySupabaseAuth.required, revokeSession);
 
 export default router;

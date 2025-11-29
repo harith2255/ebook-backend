@@ -11,16 +11,25 @@ import { verifySupabaseAuth } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-router.post("/unified", verifySupabaseAuth, unifiedPurchase);
+router.post("/unified", verifySupabaseAuth.required, unifiedPurchase);
 
-router.get("/check", verifySupabaseAuth, checkPurchase);
+router.get("/check", verifySupabaseAuth.required, checkPurchase);
 
-router.get("/purchased/books", verifySupabaseAuth, getPurchasedBooks);
-router.get("/purchased/book-ids", verifySupabaseAuth, getPurchasedBookIds);
-router.get("/purchased/note-ids", verifySupabaseAuth, getPurchasedNoteIds);
+router.get("/purchased/books", verifySupabaseAuth.required, getPurchasedBooks);
 
-router.get("/notes/ids", verifySupabaseAuth, getPurchasedNoteIds);
+router.get(
+  "/purchased/book-ids",
+  verifySupabaseAuth.required,
+  getPurchasedBookIds
+);
 
+router.get(
+  "/purchased/note-ids",
+  verifySupabaseAuth.required,
+  getPurchasedNoteIds
+);
 
+// Duplicate route — keeping it for compatibility
+router.get("/notes/ids", verifySupabaseAuth.required, getPurchasedNoteIds);
 
 export default router;

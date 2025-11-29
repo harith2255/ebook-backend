@@ -8,8 +8,6 @@ import supabase from "./utils/supabaseClient.js";
 dotenv.config();
 const app = express();
 
-
-
 // cors
 app.use(
   cors({
@@ -18,11 +16,11 @@ app.use(
       "http://localhost:3001",
       "http://127.0.0.1:3000",
       "http://127.0.0.1:3001",
-      "https://e-book-gray-one.vercel.app"
+      "https://e-book-gray-one.vercel.app",
     ],
     credentials: true,
-    methods: ["GET", "POST", "PUT","PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"]
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
 
@@ -31,8 +29,6 @@ app.use(bodyParser.json());
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-
 
 // ---------- CRON JOB ----------
 cron.schedule("*/5 * * * *", async () => {
@@ -76,7 +72,7 @@ cron.schedule("*/5 * * * *", async () => {
 
 // ---------- Routes ----------
 import authRoutes from "./routes/authRoutes.js";
-import bookRoutes from "./routes/bookRoutes.js";          // ⭐ PUBLIC BOOKS
+import bookRoutes from "./routes/bookRoutes.js"; // ⭐ PUBLIC BOOKS
 import dashboardRoutes from "./routes/dashboardRoutes.js";
 import libraryRoutes from "./routes/libraryRoutes.js";
 import mocktestRoutes from "./routes/mocktestRoutes.js";
@@ -84,13 +80,14 @@ import notesRoutes from "./routes/notesRoutes.js";
 import writingRoutes from "./routes/writingRoutes.js";
 import jobRoutes from "./routes/jobRoutes.js";
 import profileRoutes from "./routes/profileRoutes.js";
-import purchaseRoutes from "./routes/purchaseRoutes.js";  // ⭐ PURCHASE
+import purchaseRoutes from "./routes/purchaseRoutes.js"; // ⭐ PURCHASE
 import testRoutes from "./routes/testRoutes.js";
+import examRoutes from "./routes/examRoutes.js";
 
 // ---------- Admin Routes ----------
 import admindashboardRoutes from "./routes/admin/admindashboardRoutes.js";
 import customerRoutes from "./routes/admin/customerRoutes.js";
-import contentRoutes from "./routes/admin/contentRoutes.js";   // ⭐ UPLOAD CONTENT
+import contentRoutes from "./routes/admin/contentRoutes.js"; // ⭐ UPLOAD CONTENT
 import drmRoutes from "./routes/admin/drmRoutes.js";
 import reportsRoutes from "./routes/admin/reportRoutes.js";
 import aiRoutes from "./routes/admin/aiRoutes.js";
@@ -99,6 +96,7 @@ import seedRoutes from "./routes/admin/seedRoutes.js";
 import adminJobRoutes from "./routes/admin/jobRoutes.js";
 import systemSettings from "./routes/admin/systemSettingsRoutes.js";
 import adminWritingServiceRoutes from "./routes/admin/adminWritingServiceRoutes.js";
+import adminExamRoutes from "./routes/admin/adminExamRoutes.js";
 
 // ---------- PUBLIC CONTENT (user side) ----------
 import publicContentRoutes from "./routes/publicContentRoutes.js";
@@ -121,11 +119,12 @@ app.use("/api/writing", writingRoutes);
 app.use("/api/jobs", jobRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/test", testRoutes);
+app.use("/api/exams", examRoutes);
 
 // ⭐ ADMIN ROUTES
 app.use("/api/admin", admindashboardRoutes);
 app.use("/api/admin/customers", customerRoutes);
-app.use("/api/admin/content", contentRoutes);   // upload list delete edit
+app.use("/api/admin/content", contentRoutes); // upload list delete edit
 app.use("/api/admin/drm", drmRoutes);
 app.use("/api/admin/reports", reportsRoutes);
 app.use("/api/admin/ai", aiRoutes);
@@ -134,12 +133,12 @@ app.use("/api/admin/seed", seedRoutes);
 app.use("/api/admin/jobs", adminJobRoutes);
 app.use("/api/admin/settings", systemSettings);
 app.use("/api/admin/writing-service", adminWritingServiceRoutes);
-import adminPaymentsRoutes from "./routes/admin/paymentRoutes.js"
-app.use("/api/admin/payments",adminPaymentsRoutes)
+import adminPaymentsRoutes from "./routes/admin/paymentRoutes.js";
+app.use("/api/admin/payments", adminPaymentsRoutes);
+app.use("/api/admin/exams", adminExamRoutes);
 
 // ⭐ PUBLIC CONTENT FOR USERS (notes, mocktests)
 app.use("/api/content", publicContentRoutes);
-
 
 import subscriptionsRoutes from "./routes/subscriptionRoutes.js";
 import paymentsRoutes from "./routes/paymentRoutes.js";
@@ -147,7 +146,7 @@ import paymentsRoutes from "./routes/paymentRoutes.js";
 app.use("/api/subscriptions", subscriptionsRoutes);
 app.use("/api/payments", paymentsRoutes);
 
-import cartRouter  from "./routes/cartRoutes.js";
+import cartRouter from "./routes/cartRoutes.js";
 
 app.use("/api/cart", cartRouter);
 
@@ -155,19 +154,10 @@ import notificationsRoutes from "./routes/notificationRoutes.js";
 
 app.use("/api/notifications", notificationsRoutes);
 
-
-
-
-
-
-
-
-
 // Base Route
 app.get("/", (req, res) => {
   res.send("✅ Backend running successfully 🚀");
 });
-
 
 // Error Handler
 app.use((err, req, res, next) => {

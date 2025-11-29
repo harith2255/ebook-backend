@@ -46,7 +46,7 @@ export const getActiveSubscription = async (req, res) => {
       name: data.plan.name,
       price: data.plan.price,
       period: data.plan.period,
-      renewsOn: data.expires_at,   // important
+      renewsOn: data.expires_at, // important
     };
 
     res.json(active);
@@ -55,7 +55,6 @@ export const getActiveSubscription = async (req, res) => {
     res.status(500).json({ error: "Failed to fetch subscription" });
   }
 };
-
 
 /**
  * POST /api/subscriptions/upgrade
@@ -88,7 +87,7 @@ export const upgradeSubscription = async (req, res) => {
         currency: "INR",
         method: "manual-test",
         status: "completed",
-        description: `Purchase ${plan.name}`
+        description: `Purchase ${plan.name}`,
       });
 
     if (txErr) throw txErr;
@@ -115,7 +114,7 @@ export const upgradeSubscription = async (req, res) => {
         plan_id: planId,
         started_at: new Date().toISOString(),
         expires_at: expiresAt,
-        status: "active"
+        status: "active",
       })
       .select()
       .single();
@@ -131,7 +130,7 @@ export const upgradeSubscription = async (req, res) => {
         price: plan.price,
         period: plan.period,
         renewsOn: expiresAt,
-      }
+      },
     });
   } catch (err) {
     console.error("upgradeSubscription error:", err.message || err);
@@ -139,3 +138,77 @@ export const upgradeSubscription = async (req, res) => {
   }
 };
 
+export const getSinglePlan = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { data, error } = await supabase
+      .from("subscription_plans")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (error) throw error;
+
+    if (!data) {
+      return res.status(404).json({ error: "Subscription plan not found" });
+    }
+
+    res.json({
+      id: data.id,
+      name: data.name,
+      price: data.price,
+      period: data.period,
+      description: data.description || "",
+      features: data.features || [],
+    });
+  } catch (err) {
+    console.error("getSinglePlan error:", err.message || err);
+    res.status(500).json({ error: "Failed to load subscription plan" });
+  }
+};
+// controllers/subscriptionController.js (append)
+export const cancelSubscription = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const { data: activeSub, error: activeErr } = await supabase
+      .from("user_subscriptions")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("status", "active")
+      .maybeSingle();
+
+    if (activeErr) throw activeErr;
+    if (!activeSub)
+      return res.status(400).json({ error: "No active subscription found" });
+
+    // mark canceled (but keep expiry so user retains access until then)
+    const { error: updateErr } = await supabase
+      .from("user_subscriptions")
+      .update({ status: "canceled" })
+      .eq("id", activeSub.id);
+
+    if (updateErr) throw updateErr;
+
+    // optional: log cancellation transaction
+    await supabase.from("payments_transactions").insert({
+      user_id: userId,
+      plan_id: activeSub.plan_id,
+      amount: 0,
+      currency: "INR",
+      method: "system",
+      status: "completed",
+      description: "Subscription canceled",
+    });
+
+    return res.json({
+      success: true,
+      message: "Subscription canceled successfully",
+      expiresAt: activeSub.expires_at,
+    });
+  } catch (err) {
+    console.error("cancelSubscription error:", err.message || err);
+    res.status(500).json({ error: "Failed to cancel subscription" });
+  }
+};

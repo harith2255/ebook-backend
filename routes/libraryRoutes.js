@@ -22,12 +22,13 @@ import {
   deleteHighlight,
   getLastPage,
   saveLastPage,
-  saveStudySession
+  saveStudySession,
 } from "../controllers/libraryController.js";
 
 const router = express.Router();
 
-router.use(verifySupabaseAuth);
+// Require login for ALL routes in this file
+router.use(verifySupabaseAuth.required);
 
 // ----- 📚 Library Routes -----
 router.get("/", getUserLibrary);
@@ -39,9 +40,8 @@ router.get("/completed", getCompletedBooks);
 router.get("/search", searchLibrary);
 router.put("/progress/:bookId", updateReadingProgress);
 router.post("/read/start", startReading);
-router.put("/complete/:bookId", markBookCompleted);  
+router.put("/complete/:bookId", markBookCompleted);
 router.post("/study-session", saveStudySession);
-
 
 // ----- 📄 Last Page Routes -----
 router.get("/lastpage/:bookId", getLastPage);

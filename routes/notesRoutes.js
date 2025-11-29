@@ -20,35 +20,42 @@ const router = express.Router();
 /* ============================
    PUBLIC ROUTES
 ============================= */
+
+// Public notes listing
 router.get("/", getAllNotes);
 
 /* ============================
    PROTECTED ROUTES
 ============================= */
 
-// Get user's purchased notes list
-router.get("/purchased/all", verifySupabaseAuth, getPurchasedNotes);
+// Get user's purchased notes
+router.get("/purchased/all", verifySupabaseAuth.required, getPurchasedNotes);
 
 // Get user's download history
-router.get("/downloaded", verifySupabaseAuth, getDownloadedNotes);
+router.get("/downloaded", verifySupabaseAuth.required, getDownloadedNotes);
 
 // Download a note (increments download count)
-router.post("/:id/download", verifySupabaseAuth, drmCheck, incrementDownloads);
+router.post(
+  "/:id/download",
+  verifySupabaseAuth.required,
+  drmCheck,
+  incrementDownloads
+);
 
-// Get note details (with DRM info)
-router.get("/:id", verifySupabaseAuth, drmCheck, getNoteById);
+// Get note details + DRM
+router.get("/:id", verifySupabaseAuth.required, drmCheck, getNoteById);
 
-/* ============================
-   NOTE: Purchase endpoints moved to purchaseRoutes.js
-   Use /api/purchase/notes or /api/purchase/unified
-============================= */
+// Note Highlights
+router.get("/highlights/:id", verifySupabaseAuth.required, getNoteHighlights);
+router.post("/highlights", verifySupabaseAuth.required, addNoteHighlight);
+router.delete(
+  "/highlights/:id",
+  verifySupabaseAuth.required,
+  deleteNoteHighlight
+);
 
-router.get("/highlights/:id", verifySupabaseAuth, getNoteHighlights);
-router.post("/highlights", verifySupabaseAuth, addNoteHighlight);
-router.delete("/highlights/:id", verifySupabaseAuth, deleteNoteHighlight);
-
-router.get("/lastpage/:id", verifySupabaseAuth, getNoteLastPage);
-router.put("/lastpage/:id", verifySupabaseAuth, saveNoteLastPage);
-
+// Last page tracking
+router.get("/lastpage/:id", verifySupabaseAuth.required, getNoteLastPage);
+router.put("/lastpage/:id", verifySupabaseAuth.required, saveNoteLastPage);
 
 export default router;
