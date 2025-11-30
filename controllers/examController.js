@@ -15,30 +15,6 @@ function isUnlocked(exam) {
   return true;
 }
 
-/* -------------------- CREATE EXAM (ADMIN) -------------------- */
-export async function createExam(req, res) {
-  try {
-    const { title, description, folder_id, start_time, end_time } = req.body;
-
-    const created_by = req.user?.id || null;
-
-    const { data, error } = await supabaseAdmin
-      .from("exams")
-      .insert([
-        { title, description, folder_id, start_time, end_time, created_by },
-      ])
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    return res.json({ success: true, exam: data });
-  } catch (err) {
-    console.error("createExam:", err);
-    return res.status(500).json({ error: err.message });
-  }
-}
-
 /* -------------------- UPLOAD EXAM FILE -------------------- */
 export async function uploadExamFile(req, res) {
   try {
@@ -247,33 +223,54 @@ export async function getSubmissions(req, res) {
 }
 
 /* -------------------- USER: MY SUBMISSIONS -------------------- */
+/* -------------------- USER: MY SUBMISSIONS -------------------- */
 export async function getUserSubmissions(req, res) {
   try {
     const user = req.user;
-
     if (!user) return res.status(401).json({ error: "Unauthorized" });
 
+    // Fetch submissions with exam title
     const { data, error } = await supabaseAdmin
       .from("submissions")
-      .select("*")
+      .select(
+        `
+        id,
+        exam_id,
+        answer_text,
+        answer_file_path,
+        answer_file_name,
+        submitted_at,
+        score,
+        admin_message,
+        exams (
+          title,
+          file_name
+        )
+      `
+      )
       .eq("user_id", user.id)
       .order("submitted_at", { ascending: false });
 
     if (error) throw error;
 
+    // Add signed URLs
     const enriched = await Promise.all(
-      data.map(async (s) => {
-        let url = null;
+      (data || []).map(async (s) => {
+        let fileUrl = null;
 
         if (s.answer_file_path) {
           const { data: signed } = await supabaseAdmin.storage
             .from(SUBMISSION_BUCKET)
             .createSignedUrl(s.answer_file_path, 300);
 
-          url = signed?.signedUrl ?? null;
+          fileUrl = signed?.signedUrl ?? null;
         }
 
-        return { ...s, answer_file_url: url };
+        return {
+          ...s,
+          exam_title: s.exams?.title || s.exams?.file_name || "Unknown Exam",
+          answer_file_url: fileUrl,
+        };
       })
     );
 

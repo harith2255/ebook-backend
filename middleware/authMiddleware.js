@@ -65,23 +65,26 @@ export const verifySupabaseAuth = {
 // FIX: correct backward compatibility
 export default verifySupabaseAuth; // 👈 THIS IS THE FIX
 
-export async function adminOnly(req, res, next) {
+export function adminOnly(req, res, next) {
   try {
+    const SUPER_ADMIN_EMAIL =
+      process.env.SUPER_ADMIN_EMAIL?.trim()?.toLowerCase();
+
     if (!req.user) {
-      return res.status(401).json({ error: "Unauthorized: No user attached" });
+      return res.status(401).json({ error: "Unauthorized: No user" });
     }
 
     const email = req.user.email?.toLowerCase();
-    const adminEmail = process.env.SUPER_ADMIN_EMAIL?.toLowerCase();
-
     const metaRole = req.user.app_metadata?.role;
     const userMetaRole = req.user.user_metadata?.role;
 
     const isAdmin =
-      email === adminEmail || metaRole === "admin" || userMetaRole === "admin";
+      email === SUPER_ADMIN_EMAIL ||
+      metaRole === "admin" ||
+      userMetaRole === "admin";
 
     if (!isAdmin) {
-      return res.status(403).json({ error: "Access denied: Admins only" });
+      return res.status(403).json({ error: "Admins only" });
     }
 
     next();
@@ -90,6 +93,7 @@ export async function adminOnly(req, res, next) {
     res.status(500).json({ error: "Internal server error" });
   }
 }
+
 export function verify(req, res, next) {
   return verifySupabaseAuth.required(req, res, next);
 }

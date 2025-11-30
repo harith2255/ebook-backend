@@ -18,7 +18,7 @@ export async function register(req, res) {
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { first_name, last_name, full_name } }
+      options: { data: { first_name, last_name, full_name } },
     });
 
     if (authError) return res.status(400).json({ error: authError.message });
@@ -47,9 +47,15 @@ export async function register(req, res) {
 
     return res.status(201).json({
       message: "Account created successfully",
-      user: { id: userId, first_name, last_name, full_name, email, role: "User" }
+      user: {
+        id: userId,
+        first_name,
+        last_name,
+        full_name,
+        email,
+        role: "User",
+      },
     });
-
   } catch (err) {
     console.error("Unexpected register error:", err);
     return res.status(500).json({ error: "Internal Server Error" });
@@ -111,16 +117,20 @@ export async function login(req, res) {
       book_title: null,
       device_info: req.headers["user-agent"],
       ip_address: req.ip,
-      created_at: new Date()
+      created_at: new Date(),
     });
 
     // Response
+
     return res.status(200).json({
       message: "Login successful",
       user: { id: userId, email, role, full_name: fullName },
-      access_token: accessToken,
-    });
 
+      // always provide the correct token fields
+      access_token: accessToken,
+      token: accessToken, // universal
+      refresh_token: loginData.session?.refresh_token,
+    });
   } catch (err) {
     console.error("Login error:", err);
     return res.status(500).json({ error: "Internal Server Error" });
@@ -140,7 +150,12 @@ export async function logout(req, res) {
 
     // Activity Log
     if (user && user.role === "User") {
-      await logActivity(user.id, user.full_name || user.email, "logged out", "login");
+      await logActivity(
+        user.id,
+        user.full_name || user.email,
+        "logged out",
+        "login"
+      );
     }
 
     /* ==========================================================
@@ -155,12 +170,11 @@ export async function logout(req, res) {
         book_title: null,
         device_info: req.headers["user-agent"],
         ip_address: req.ip,
-        created_at: new Date()
+        created_at: new Date(),
       });
     }
 
     return res.status(200).json({ message: "Logged out successfully" });
-
   } catch (err) {
     console.error("Logout error:", err);
     return res.status(500).json({ error: "Internal Server Error" });

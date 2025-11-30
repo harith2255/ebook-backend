@@ -294,7 +294,22 @@ export async function getExamSubmissions(req, res) {
 
     const { data, error } = await supabaseAdmin
       .from("submissions")
-      .select("*, users(email)")
+      .select(
+        `
+        id,
+        exam_id,
+        user_id,
+        answer_text,
+        answer_file_path,
+        answer_file_name,
+        submitted_at,
+        score,
+        admin_message,
+        users:user_id (
+          email
+        )
+      `
+      )
       .eq("exam_id", examId)
       .order("submitted_at", { ascending: false });
 
@@ -302,13 +317,20 @@ export async function getExamSubmissions(req, res) {
 
     const enriched = await Promise.all(
       (data || []).map(async (s) => {
-        if (!s.answer_file_path) return s;
+        let url = null;
+        if (s.answer_file_path) {
+          const { data: signedUrl } = await supabaseAdmin.storage
+            .from("submission-files")
+            .createSignedUrl(s.answer_file_path, 300);
+          url = signedUrl?.signedUrl || null;
+        }
 
-        const { data: urlData } = await supabaseAdmin.storage
-          .from(SUBMISSION_BUCKET)
-          .createSignedUrl(s.answer_file_path, 300);
-
-        return { ...s, answer_file_url: urlData?.signedUrl };
+        return {
+          ...s,
+          user_email: s.users?.email || null,
+          answer_file_url: url,
+          createdAt: s.submitted_at, // frontend expects createdAt
+        };
       })
     );
 
@@ -348,90 +370,179 @@ export async function gradeSubmission(req, res) {
 /* -------------------------------------------------------------------------- */
 /*                           GET FOLDERS (ADMIN UI)                            */
 /* -------------------------------------------------------------------------- */
+// controllers/admin/adminExamController.js
+
 export async function getFolders(req, res) {
+  console.log(
+    "🔥 getFolders req.user =",
+    req.user && {
+      id: req.user.id,
+      email: req.user.email,
+      app_metadata: req.user.app_metadata,
+      user_metadata: req.user.user_metadata,
+    }
+  );
+
   try {
-    const { data: subjects } = await supabaseAdmin
+    // subjects
+    const {
+      data: subjects,
+      error: subErr,
+      status: subStatus,
+    } = await supabaseAdmin
       .from("subjects")
       .select("*")
-      .order("label");
+      .order("label", { ascending: true });
 
-    const { data: notes } = await supabaseAdmin.from("study_notes").select("*");
+    console.log("➡ subjects status:", subStatus, "error:", subErr);
+    console.log(
+      "➡ subjects count:",
+      Array.isArray(subjects) ? subjects.length : typeof subjects
+    );
 
-    const { data: exams } = await supabaseAdmin.from("exams").select("*");
+    // if no subjects, print environment + client info
+    if (!Array.isArray(subjects) || subjects.length === 0) {
+      console.warn(
+        "⚠ No subjects returned. ENV SUPER_ADMIN_EMAIL:",
+        process.env.SUPER_ADMIN_EMAIL
+      );
+    }
 
     const now = dayjs();
 
-    const folders = await Promise.all(
-      (subjects || []).map(async (s) => {
-        const subjectNotes = await Promise.all(
-          (notes || [])
-            .filter((n) => n.subject_id === s.id)
-            .map(async (n) => {
-              const { data } = await supabaseAdmin.storage
-                .from(NOTES_BUCKET)
+    const folders = [];
+
+    for (const s of subjects || []) {
+      console.log(`\n--- Processing subject: ${s.id} / ${s.label}`);
+
+      // fetch notes for subject
+      const {
+        data: subjectNotesRaw,
+        error: notesErr,
+        status: notesStatus,
+      } = await supabaseAdmin
+        .from("study_notes")
+        .select("*")
+        .eq("subject_id", s.id)
+        .order("created_at", { ascending: false });
+
+      console.log("  notes status:", notesStatus, "error:", notesErr);
+      console.log(
+        "  notes count:",
+        Array.isArray(subjectNotesRaw)
+          ? subjectNotesRaw.length
+          : typeof subjectNotesRaw
+      );
+
+      const subjectNotes = [];
+      if (Array.isArray(subjectNotesRaw)) {
+        for (const n of subjectNotesRaw) {
+          try {
+            const { data: storageData, error: storageErr } =
+              await supabaseAdmin.storage
+                .from(process.env.NOTES_BUCKET || "notes")
                 .createSignedUrl(n.file_path, 300);
-              return {
-                id: n.id,
-                name: n.file_name,
-                url: data?.signedUrl ?? null,
-                createdAt: n.created_at,
-              };
-            })
-        );
+            if (storageErr)
+              console.warn("   storageErr for note", n.id, storageErr);
+            subjectNotes.push({
+              id: n.id,
+              name: n.file_name,
+              url: storageData?.signedUrl ?? null,
+              createdAt: n.created_at,
+            });
+          } catch (e) {
+            console.error("   exception creating signed url for note", n.id, e);
+            subjectNotes.push({
+              id: n.id,
+              name: n.file_name,
+              url: null,
+              createdAt: n.created_at,
+            });
+          }
+        }
+      }
 
-        const subjectExams = await Promise.all(
-          (exams || [])
-            .filter((e) => e.subject_id === s.id)
-            .map(async (e) => {
-              const unlocked =
-                !!e.start_time &&
-                !dayjs(e.start_time).isAfter(now) &&
-                (!e.end_time || !dayjs(e.end_time).isBefore(now));
+      // fetch exams for subject
+      const {
+        data: subjectExamsRaw,
+        error: examsErr,
+        status: examsStatus,
+      } = await supabaseAdmin
+        .from("exams")
+        .select("*")
+        .eq("subject_id", s.id)
+        .order("created_at", { ascending: false });
 
-              let url = null;
-              if (unlocked && e.file_path) {
-                const { data } = await supabaseAdmin.storage
-                  .from(EXAMS_BUCKET)
+      console.log("  exams status:", examsStatus, "error:", examsErr);
+      console.log(
+        "  exams count:",
+        Array.isArray(subjectExamsRaw)
+          ? subjectExamsRaw.length
+          : typeof subjectExamsRaw
+      );
+
+      const subjectExams = [];
+      if (Array.isArray(subjectExamsRaw)) {
+        for (const e of subjectExamsRaw) {
+          try {
+            const unlocked =
+              !!e.start_time &&
+              !dayjs(e.start_time).isAfter(now) &&
+              (!e.end_time || !dayjs(e.end_time).isBefore(now));
+
+            let url = null;
+            if (unlocked && e.file_path) {
+              const { data: fileData, error: fileErr } =
+                await supabaseAdmin.storage
+                  .from(process.env.EXAMS_BUCKET || "exams")
                   .createSignedUrl(e.file_path, 300);
-                url = data?.signedUrl;
-              }
+              if (fileErr)
+                console.warn("   storageErr for exam", e.id, fileErr);
+              url = fileData?.signedUrl ?? null;
+            }
 
-              const { count } = await supabaseAdmin
-                .from("submissions")
-                .select("*", { head: true, count: "exact" })
-                .eq("exam_id", e.id);
+            const { count } = await supabaseAdmin
+              .from("submissions")
+              .select("*", { head: true, count: "exact" })
+              .eq("exam_id", e.id);
 
-              const { data: graded } = await supabaseAdmin
-                .from("submissions")
-                .select("id")
-                .eq("exam_id", e.id)
-                .not("score", "is", null);
+            const { data: graded, error: gradedErr } = await supabaseAdmin
+              .from("submissions")
+              .select("id")
+              .eq("exam_id", e.id)
+              .not("score", "is", null);
 
-              return {
-                id: e.id,
-                name: e.file_name || e.title,
-                url,
-                unlocked,
-                submissions: count || 0,
-                graded_count: graded?.length || 0,
-                createdAt: e.created_at,
-              };
-            })
-        );
+            if (gradedErr)
+              console.warn("   gradedErr for exam", e.id, gradedErr);
 
-        return {
-          id: s.id,
-          subject: s.label,
-          notes: subjectNotes,
-          exams: subjectExams,
-        };
-      })
-    );
+            subjectExams.push({
+              id: e.id,
+              name: e.file_name || e.title,
+              url,
+              unlocked,
+              submissions: count ?? 0,
+              graded_count: Array.isArray(graded) ? graded.length : 0,
+              createdAt: e.created_at,
+            });
+          } catch (e) {
+            console.error("   exception processing exam", e);
+          }
+        }
+      }
 
+      folders.push({
+        id: s.id,
+        subject: s.label,
+        notes: subjectNotes,
+        exams: subjectExams,
+      });
+    }
+
+    console.log("\n✅ Built folders count:", folders.length);
     return res.json({ success: true, folders });
   } catch (err) {
-    console.error("getFolders:", err);
-    return res.status(500).json({ error: err.message });
+    console.error("getFolders: CATCH ERROR", err);
+    return res.status(500).json({ error: err.message || String(err) });
   }
 }
 

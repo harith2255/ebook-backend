@@ -31,7 +31,7 @@ const router = express.Router();
 /* -------------------------------------------------------------------------- */
 
 /* 🔹 LIST SUBJECTS — MUST BE ABOVE "/" ROUTE */
-router.get("/subjects", verifySupabaseAuth.optional, listSubjects);
+router.get("/subjects", verifySupabaseAuth.required, adminOnly, listSubjects);
 
 /* 🔹 GET ADMIN FOLDERS */
 router.get("/folders", verifySupabaseAuth.required, adminOnly, getFolders);
@@ -39,31 +39,31 @@ router.get("/folders", verifySupabaseAuth.required, adminOnly, getFolders);
 /* 🔹 CREATE EXAM */
 router.post("/", verifySupabaseAuth.required, adminOnly, createExam);
 
-/* 🔹 UPLOAD EXAM FILE */
+/* NOTE UPLOAD */
 router.post(
-  "/:id/upload-file",
+  "/notes/upload",
+  upload.single("file"),
   verifySupabaseAuth.required,
   adminOnly,
+  uploadNote
+);
+
+/* EXAM FILE UPLOAD */
+router.post(
+  "/:id/upload-file",
   upload.single("file"),
+  verifySupabaseAuth.required,
+  adminOnly,
   uploadExamFile
 );
 
-/* 🔹 UNIFIED UPLOAD (note/exam) */
+/* UNIFIED UPLOAD */
 router.post(
   "/upload",
+  upload.single("file"),
   verifySupabaseAuth.required,
   adminOnly,
-  upload.single("file"),
   uploadUnified
-);
-
-/* 🔹 LEGACY NOTE UPLOAD */
-router.post(
-  "/notes/upload",
-  verifySupabaseAuth.required,
-  adminOnly,
-  upload.single("file"),
-  uploadNote
 );
 
 /* 🔹 DELETE SUBJECT */
