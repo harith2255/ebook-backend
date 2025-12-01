@@ -51,7 +51,7 @@ export const getBookById = async (req, res) => {
     if (error) throw error;
     if (!book) return res.status(404).json({ error: "Book not found" });
 
-    res.json(book);
+    res.json({book});
   } catch (err) {
     console.error("getBookById error:", err);
     res.status(404).json({ error: "Book not found" });

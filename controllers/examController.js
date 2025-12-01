@@ -3,15 +3,21 @@ import dayjs from "dayjs";
 import { v4 as uuidv4 } from "uuid";
 import { supabaseAdmin } from "../utils/supabaseClient.js";
 
-const EXAM_BUCKET = "exam-files";
+const EXAMS_BUCKET = "exam-files";
 const SUBMISSION_BUCKET = "submission-files";
+const NOTES_BUCKET = "notes-files";
 
 /* -------------------- UNLOCK HELPER -------------------- */
 function isUnlocked(exam) {
-  const now = dayjs();
   if (!exam) return false;
-  if (exam.start_time && dayjs(exam.start_time).isAfter(now)) return false;
-  if (exam.end_time && dayjs(exam.end_time).isBefore(now)) return false;
+
+  const now = dayjs();
+  const start = exam.start_time ? dayjs(exam.start_time) : null;
+  const end = exam.end_time ? dayjs(exam.end_time) : null;
+
+  if (start && start.isAfter(now)) return false;
+  if (end && end.isBefore(now)) return false;
+
   return true;
 }
 
@@ -19,14 +25,13 @@ function isUnlocked(exam) {
 export async function uploadExamFile(req, res) {
   try {
     const examId = Number(req.params.id);
-
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
     const filename = `${uuidv4()}-${req.file.originalname}`;
     const path = `exams/${filename}`;
 
     const { error: uploadErr } = await supabaseAdmin.storage
-      .from(EXAM_BUCKET)
+      .from(EXAMS_BUCKET)
       .upload(path, req.file.buffer, {
         contentType: req.file.mimetype,
         upsert: false,
@@ -36,7 +41,10 @@ export async function uploadExamFile(req, res) {
 
     const { data, error } = await supabaseAdmin
       .from("exams")
-      .update({ file_path: path, file_name: req.file.originalname })
+      .update({
+        file_path: path,
+        file_name: req.file.originalname,
+      })
       .eq("id", examId)
       .select()
       .single();
@@ -46,52 +54,51 @@ export async function uploadExamFile(req, res) {
     return res.json({ success: true, exam: data });
   } catch (err) {
     console.error("uploadExamFile:", err);
-    return res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message });
   }
 }
 
-/* -------------------- LIST EXAMS -------------------- */
+/* -------------------- LIST EXAMS (SHOW ALL) -------------------- */
 export async function listExams(req, res) {
   try {
-    const status = req.query.status;
-
     const { data: exams, error } = await supabaseAdmin
       .from("exams")
       .select("*")
-      .order("start_time", { ascending: true });
+      .order("start_time");
 
     if (error) throw error;
 
+    const now = dayjs();
+
     const enriched = await Promise.all(
-      exams.map(async (ex) => {
-        let signedUrl = null;
+      (exams || []).map(async (exam) => {
+        const unlocked = isUnlocked(exam);
 
-        if (ex.file_path && isUnlocked(ex)) {
-          const { data: urlData } = await supabaseAdmin.storage
-            .from(EXAM_BUCKET)
-            .createSignedUrl(ex.file_path, 300);
+        let view_url = null;
+        if (unlocked && exam.file_path) {
+          const { data: signed } = await supabaseAdmin.storage
+            .from(EXAMS_BUCKET)
+            .createSignedUrl(exam.file_path, 300);
 
-          signedUrl = urlData?.signedUrl ?? null;
+          view_url = signed?.signedUrl ?? null;
         }
 
-        return { ...ex, unlocked: isUnlocked(ex), view_url: signedUrl };
+        return {
+          ...exam,
+          unlocked,
+          view_url, // null for locked exams
+        };
       })
     );
 
-    let filtered = enriched;
-
-    if (status === "available") filtered = enriched.filter((e) => e.unlocked);
-    else if (status === "upcoming")
-      filtered = enriched.filter((e) => !e.unlocked && e.start_time);
-
-    return res.json({ success: true, exams: filtered });
+    return res.json({ success: true, exams: enriched });
   } catch (err) {
     console.error("listExams:", err);
-    return res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message });
   }
 }
 
-/* -------------------- GET SINGLE EXAM -------------------- */
+/* -------------------- GET EXAM -------------------- */
 export async function getExam(req, res) {
   try {
     const id = Number(req.params.id);
@@ -102,29 +109,30 @@ export async function getExam(req, res) {
       .eq("id", id)
       .single();
 
-    if (error) return res.status(404).json({ error: "Not found" });
+    if (error || !exam) return res.status(404).json({ error: "Not found" });
 
-    let signedUrl = null;
+    const unlocked = isUnlocked(exam);
 
-    if (exam.file_path && isUnlocked(exam)) {
-      const { data: urlData } = await supabaseAdmin.storage
-        .from(EXAM_BUCKET)
+    let view_url = null;
+    if (unlocked && exam.file_path) {
+      const { data: signed } = await supabaseAdmin.storage
+        .from(EXAMS_BUCKET)
         .createSignedUrl(exam.file_path, 300);
 
-      signedUrl = urlData?.signedUrl ?? null;
+      view_url = signed?.signedUrl ?? null;
     }
 
     return res.json({
       success: true,
       exam: {
         ...exam,
-        unlocked: isUnlocked(exam),
-        view_url: signedUrl,
+        unlocked,
+        view_url,
       },
     });
   } catch (err) {
     console.error("getExam:", err);
-    return res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message });
   }
 }
 
@@ -142,7 +150,7 @@ export async function attendExam(req, res) {
       .eq("id", examId)
       .single();
 
-    if (examErr) throw examErr;
+    if (examErr || !exam) throw examErr;
 
     if (!isUnlocked(exam))
       return res.status(403).json({ error: "Exam not unlocked or closed" });
@@ -158,7 +166,6 @@ export async function attendExam(req, res) {
         .from(SUBMISSION_BUCKET)
         .upload(path, req.file.buffer, {
           contentType: req.file.mimetype,
-          upsert: false,
         });
 
       if (uploadErr) throw uploadErr;
@@ -186,50 +193,16 @@ export async function attendExam(req, res) {
     return res.json({ success: true, submission: data });
   } catch (err) {
     console.error("attendExam:", err);
-    return res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message });
   }
 }
 
-/* -------------------- ADMIN: GET ALL SUBMISSIONS -------------------- */
-export async function getSubmissions(req, res) {
-  try {
-    const examId = Number(req.params.id);
-
-    const { data, error } = await supabaseAdmin
-      .from("submissions")
-      .select("*")
-      .eq("exam_id", examId)
-      .order("submitted_at", { ascending: false });
-
-    if (error) throw error;
-
-    const enriched = await Promise.all(
-      data.map(async (s) => {
-        if (!s.answer_file_path) return s;
-
-        const { data: urlData } = await supabaseAdmin.storage
-          .from(SUBMISSION_BUCKET)
-          .createSignedUrl(s.answer_file_path, 300);
-
-        return { ...s, answer_file_url: urlData?.signedUrl ?? null };
-      })
-    );
-
-    return res.json({ success: true, submissions: enriched });
-  } catch (err) {
-    console.error("getSubmissions:", err);
-    return res.status(500).json({ error: err.message });
-  }
-}
-
-/* -------------------- USER: MY SUBMISSIONS -------------------- */
 /* -------------------- USER: MY SUBMISSIONS -------------------- */
 export async function getUserSubmissions(req, res) {
   try {
     const user = req.user;
     if (!user) return res.status(401).json({ error: "Unauthorized" });
 
-    // Fetch submissions with exam title
     const { data, error } = await supabaseAdmin
       .from("submissions")
       .select(
@@ -242,10 +215,7 @@ export async function getUserSubmissions(req, res) {
         submitted_at,
         score,
         admin_message,
-        exams (
-          title,
-          file_name
-        )
+        exams ( title, file_name )
       `
       )
       .eq("user_id", user.id)
@@ -253,7 +223,6 @@ export async function getUserSubmissions(req, res) {
 
     if (error) throw error;
 
-    // Add signed URLs
     const enriched = await Promise.all(
       (data || []).map(async (s) => {
         let fileUrl = null;
@@ -268,90 +237,127 @@ export async function getUserSubmissions(req, res) {
 
         return {
           ...s,
-          exam_title: s.exams?.title || s.exams?.file_name || "Unknown Exam",
+          exam_title: s.exams?.title || s.exams?.file_name,
           answer_file_url: fileUrl,
         };
       })
     );
 
-    return res.json({ success: true, submissions: enriched });
+    res.json({ success: true, submissions: enriched });
   } catch (err) {
     console.error("getUserSubmissions:", err);
-    return res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message });
   }
 }
 
 /* -------------------- USER SAFE FOLDERS -------------------- */
+
+
+// src/controllers/examController.js  (only the getFoldersForUser part shown)
 export async function getFoldersForUser(req, res) {
   try {
-    const { data: subjects } = await supabaseAdmin
+    // 1. Fetch subjects
+    const { data: subjects, error: subjectsErr } = await supabaseAdmin
       .from("subjects")
       .select("*")
       .order("label");
 
+    if (subjectsErr) throw subjectsErr;
+    if (!subjects) return res.json({ success: true, folders: [] });
+
+    // 2. Fetch notes + exams one time
     const { data: notes } = await supabaseAdmin.from("study_notes").select("*");
     const { data: exams } = await supabaseAdmin.from("exams").select("*");
 
-    const folders = await Promise.all(
-      subjects.map(async (s) => {
-        /* NOTES */
-        const subjectNotes = await Promise.all(
-          notes
-            .filter((n) => n.subject_id === s.id)
-            .map(async (n) => {
-              const { data: urlData } = await supabaseAdmin.storage
-                .from("notes-files")
+    // debug: log counts so you can see if exams were fetched
+    console.debug("getFoldersForUser: subjects=", (subjects || []).length, "notes=", (notes || []).length, "exams=", (exams || []).length);
+
+    const folders = [];
+
+    // 3. Build folder structure for each subject
+    for (const s of subjects) {
+      /* NOTES (unchanged) */
+      const subjectNotes = await Promise.all(
+        (notes || [])
+          .filter((n) => n.subject_id === s.id)
+          .map(async (n) => {
+            let url = null;
+            try {
+              const { data: signed } = await supabaseAdmin.storage
+                .from(NOTES_BUCKET)
                 .createSignedUrl(n.file_path, 300);
+              url = signed?.signedUrl ?? null;
+            } catch (err) {
+              console.warn("Note URL error:", err.message);
+            }
 
-              return {
-                id: n.id,
-                name: n.file_name,
-                url: urlData?.signedUrl ?? null,
-                createdAt: n.created_at,
-              };
-            })
-        );
+            return {
+              id: n.id,
+              name: n.file_name,
+              url,
+              createdAt: n.created_at,
+            };
+          })
+      );
 
-        /* EXAMS */
-        const subjectExams = await Promise.all(
-          exams
-            .filter((e) => e.subject_id === s.id)
-            .map(async (e) => {
-              const unlocked = isUnlocked(e);
+      /* EXAMS (fixed) */
+      const subjectExams = await Promise.all(
+        (exams || [])
+          .filter((e) => e.subject_id === s.id)
+          .map(async (e) => {
+            // compute a fresh "now" inside the map to avoid any stale timestamp issues
+            const now = dayjs();
 
-              let url = null;
-              if (unlocked && e.file_path) {
-                const { data: urlData } = await supabaseAdmin.storage
-                  .from("exam-files")
-                  .createSignedUrl(e.file_path, 300);
+            const unlocked =
+              (!e.start_time || dayjs(e.start_time).isBefore(now)) &&
+              (!e.end_time || dayjs(e.end_time).isAfter(now));
 
-                url = urlData?.signedUrl ?? null;
+            let url = null;
+
+            // generate signed url only if file_path exists; but log result for debugging
+            if (e.file_path) {
+              try {
+                // still only expose URL to users when unlocked
+                if (unlocked) {
+                  const { data: signed } = await supabaseAdmin.storage
+                    .from(EXAM_BUCKET)
+                    .createSignedUrl(e.file_path, 300);
+                  url = signed?.signedUrl ?? null;
+                  console.debug(`Exam signed url for exam ${e.id}:`, url);
+                } else {
+                  // keep url null for locked exams (frontend shows countdown or locked UI)
+                  console.debug(`Exam ${e.id} is locked (start=${e.start_time}, end=${e.end_time})`);
+                }
+              } catch (err) {
+                // log — do not throw so the folders response still returns
+                console.warn("Exam URL error (getFoldersForUser):", err.message, "examId=", e.id);
               }
+            }
 
-              return {
-                id: e.id,
-                name: e.file_name || e.title,
-                url,
-                unlocked,
-                start_time: e.start_time,
-                end_time: e.end_time,
-                createdAt: e.created_at,
-              };
-            })
-        );
+            return {
+              id: e.id,
+              name: e.file_name || e.title,
+              url,
+              unlocked,
+              start_time: e.start_time,
+              end_time: e.end_time,
+              createdAt: e.created_at,
+            };
+          })
+      );
 
-        return {
-          id: s.id,
-          subject: s.label,
-          notes: subjectNotes,
-          exams: subjectExams,
-        };
-      })
-    );
+      folders.push({
+        subjectId: s.id,
+        label: s.label,
+        notes: subjectNotes,
+        exams: subjectExams,
+      });
+    }
 
     return res.json({ success: true, folders });
   } catch (err) {
     console.error("getFoldersForUser:", err);
-    return res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message });
   }
 }
+

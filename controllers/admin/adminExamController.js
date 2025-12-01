@@ -74,7 +74,6 @@ export async function uploadNote(req, res) {
     const filename = `${uuid()}-${req.file.originalname}`;
     const path = `study_notes/${filename}`;
 
-    // Upload to bucket
     const { error: uploadErr } = await supabaseAdmin.storage
       .from(NOTES_BUCKET)
       .upload(path, req.file.buffer, {
@@ -83,7 +82,6 @@ export async function uploadNote(req, res) {
 
     if (uploadErr) throw uploadErr;
 
-    // Insert DB entry
     const { data, error } = await supabaseAdmin
       .from("study_notes")
       .insert([
@@ -187,43 +185,58 @@ export async function uploadExamFile(req, res) {
 /* -------------------------------------------------------------------------- */
 /*                             GET ALL EXAMS (SAFE)                            */
 /* -------------------------------------------------------------------------- */
+// src/controllers/examController.js (listExams)
+// GET ALL EXAMS (SAFE) - patched
 export async function listExams(req, res) {
   try {
     const { data: exams, error } = await supabaseAdmin
       .from("exams")
-      .select("*, subjects(label)")
+      .select("*")
       .order("start_time");
 
     if (error) throw error;
 
-    const now = dayjs();
-
     const enriched = await Promise.all(
       (exams || []).map(async (exam) => {
+        // fresh time per exam
+        const now = dayjs();
         const unlocked =
-          !!exam.start_time &&
-          !dayjs(exam.start_time).isAfter(now) &&
-          (!exam.end_time || !dayjs(exam.end_time).isBefore(now));
+          (!exam.start_time || dayjs(exam.start_time).isBefore(now)) &&
+          (!exam.end_time || dayjs(exam.end_time).isAfter(now));
 
         let view_url = null;
-
         if (unlocked && exam.file_path) {
-          const { data } = await supabaseAdmin.storage
-            .from(EXAMS_BUCKET)
-            .createSignedUrl(exam.file_path, 300);
-          view_url = data?.signedUrl ?? null;
+          try {
+            const { data: signed } = await supabaseAdmin.storage
+              .from(EXAMS_BUCKET) // <-- use correct constant
+              .createSignedUrl(exam.file_path, 300);
+
+            // defensive: supabase might return signedUrl or signed_url
+            view_url = signed?.signedUrl ?? signed?.signed_url ?? null;
+            console.debug("listExams signed url:", exam.id, view_url);
+          } catch (err) {
+            console.warn("listExams createSignedUrl error:", err?.message || err, "examId=", exam.id);
+            view_url = null;
+          }
         }
 
-        return { ...exam, unlocked, view_url };
+        return {
+          ...exam,
+          unlocked,
+          view_url, // null for locked or failed signed URLs
+        };
       })
     );
 
     return res.json({ success: true, exams: enriched });
   } catch (err) {
     console.error("listExams:", err);
-    return res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message });
   }
 }
+
+
+
 
 /* -------------------------------------------------------------------------- */
 /*                                ATTEND EXAM                                  */
@@ -241,10 +254,10 @@ export async function attendExam(req, res) {
     if (!exam) return res.status(404).json({ error: "Exam not found" });
 
     const now = dayjs();
-    const unlocked =
-      !!exam.start_time &&
-      !dayjs(exam.start_time).isAfter(now) &&
-      (!exam.end_time || !dayjs(exam.end_time).isBefore(now));
+  const unlocked =
+  (!exam.start_time || dayjs(exam.start_time).isBefore(now)) &&
+  (!exam.end_time   || dayjs(exam.end_time).isAfter(now));
+
 
     if (!unlocked) return res.status(403).json({ error: "Exam is locked" });
 
@@ -292,44 +305,39 @@ export async function getExamSubmissions(req, res) {
   try {
     const examId = Number(req.params.id);
 
-    const { data, error } = await supabaseAdmin
+    // Get submissions WITHOUT join (because FK to auth.users can't auto-join)
+    const { data: submissions, error } = await supabaseAdmin
       .from("submissions")
-      .select(
-        `
-        id,
-        exam_id,
-        user_id,
-        answer_text,
-        answer_file_path,
-        answer_file_name,
-        submitted_at,
-        score,
-        admin_message,
-        users:user_id (
-          email
-        )
-      `
-      )
+      .select("*")
       .eq("exam_id", examId)
       .order("submitted_at", { ascending: false });
 
     if (error) throw error;
 
+    // Fetch user emails manually from auth schema
     const enriched = await Promise.all(
-      (data || []).map(async (s) => {
+      submissions.map(async (s) => {
+        // fetch email
+        const { data: userData } = await supabaseAdmin.auth.admin.getUserById(
+          s.user_id
+        );
+
+        const email = userData?.user?.email ?? null;
+
+        // signed URL if file exists
         let url = null;
         if (s.answer_file_path) {
-          const { data: signedUrl } = await supabaseAdmin.storage
+          const { data: signed } = await supabaseAdmin.storage
             .from("submission-files")
             .createSignedUrl(s.answer_file_path, 300);
-          url = signedUrl?.signedUrl || null;
+          url = signed?.signedUrl ?? null;
         }
 
         return {
           ...s,
-          user_email: s.users?.email || null,
+          user_email: email,
           answer_file_url: url,
-          createdAt: s.submitted_at, // frontend expects createdAt
+          createdAt: s.submitted_at,
         };
       })
     );
@@ -341,194 +349,92 @@ export async function getExamSubmissions(req, res) {
   }
 }
 
-/* -------------------------------------------------------------------------- */
-/*                               GRADE SUBMISSION                               */
-/* -------------------------------------------------------------------------- */
-export async function gradeSubmission(req, res) {
-  try {
-    const submissionId = Number(req.params.id);
-
-    const { data, error } = await supabaseAdmin
-      .from("submissions")
-      .update({
-        score: req.body.score ?? null,
-        admin_message: req.body.admin_message ?? null,
-      })
-      .eq("id", submissionId)
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    return res.json({ success: true, submission: data });
-  } catch (err) {
-    console.error("gradeSubmission:", err);
-    return res.status(500).json({ error: err.message });
-  }
-}
 
 /* -------------------------------------------------------------------------- */
 /*                           GET FOLDERS (ADMIN UI)                            */
 /* -------------------------------------------------------------------------- */
-// controllers/admin/adminExamController.js
-
 export async function getFolders(req, res) {
-  console.log(
-    "🔥 getFolders req.user =",
-    req.user && {
-      id: req.user.id,
-      email: req.user.email,
-      app_metadata: req.user.app_metadata,
-      user_metadata: req.user.user_metadata,
-    }
-  );
+  console.log("🔥 getFolders req.user =", {
+    id: req.user?.id,
+    email: req.user?.email,
+  });
 
   try {
-    // subjects
-    const {
-      data: subjects,
-      error: subErr,
-      status: subStatus,
-    } = await supabaseAdmin
+    const { data: subjects } = await supabaseAdmin
       .from("subjects")
       .select("*")
-      .order("label", { ascending: true });
-
-    console.log("➡ subjects status:", subStatus, "error:", subErr);
-    console.log(
-      "➡ subjects count:",
-      Array.isArray(subjects) ? subjects.length : typeof subjects
-    );
-
-    // if no subjects, print environment + client info
-    if (!Array.isArray(subjects) || subjects.length === 0) {
-      console.warn(
-        "⚠ No subjects returned. ENV SUPER_ADMIN_EMAIL:",
-        process.env.SUPER_ADMIN_EMAIL
-      );
-    }
+      .order("label");
 
     const now = dayjs();
-
     const folders = [];
 
     for (const s of subjects || []) {
-      console.log(`\n--- Processing subject: ${s.id} / ${s.label}`);
-
-      // fetch notes for subject
-      const {
-        data: subjectNotesRaw,
-        error: notesErr,
-        status: notesStatus,
-      } = await supabaseAdmin
+      const { data: subjectNotesRaw } = await supabaseAdmin
         .from("study_notes")
         .select("*")
         .eq("subject_id", s.id)
         .order("created_at", { ascending: false });
 
-      console.log("  notes status:", notesStatus, "error:", notesErr);
-      console.log(
-        "  notes count:",
-        Array.isArray(subjectNotesRaw)
-          ? subjectNotesRaw.length
-          : typeof subjectNotesRaw
-      );
-
       const subjectNotes = [];
-      if (Array.isArray(subjectNotesRaw)) {
-        for (const n of subjectNotesRaw) {
-          try {
-            const { data: storageData, error: storageErr } =
-              await supabaseAdmin.storage
-                .from(process.env.NOTES_BUCKET || "notes")
-                .createSignedUrl(n.file_path, 300);
-            if (storageErr)
-              console.warn("   storageErr for note", n.id, storageErr);
-            subjectNotes.push({
-              id: n.id,
-              name: n.file_name,
-              url: storageData?.signedUrl ?? null,
-              createdAt: n.created_at,
-            });
-          } catch (e) {
-            console.error("   exception creating signed url for note", n.id, e);
-            subjectNotes.push({
-              id: n.id,
-              name: n.file_name,
-              url: null,
-              createdAt: n.created_at,
-            });
-          }
-        }
+      for (const n of subjectNotesRaw || []) {
+        const { data: storageData } = await supabaseAdmin.storage
+          .from(NOTES_BUCKET)
+          .createSignedUrl(n.file_path, 300);
+
+        subjectNotes.push({
+          id: n.id,
+          name: n.file_name,
+          url: storageData?.signedUrl ?? null,
+          createdAt: n.created_at,
+        });
       }
 
-      // fetch exams for subject
-      const {
-        data: subjectExamsRaw,
-        error: examsErr,
-        status: examsStatus,
-      } = await supabaseAdmin
+      const { data: subjectExamsRaw } = await supabaseAdmin
         .from("exams")
         .select("*")
         .eq("subject_id", s.id)
         .order("created_at", { ascending: false });
 
-      console.log("  exams status:", examsStatus, "error:", examsErr);
-      console.log(
-        "  exams count:",
-        Array.isArray(subjectExamsRaw)
-          ? subjectExamsRaw.length
-          : typeof subjectExamsRaw
-      );
-
       const subjectExams = [];
-      if (Array.isArray(subjectExamsRaw)) {
-        for (const e of subjectExamsRaw) {
-          try {
-            const unlocked =
-              !!e.start_time &&
-              !dayjs(e.start_time).isAfter(now) &&
-              (!e.end_time || !dayjs(e.end_time).isBefore(now));
+for (const e of subjectExamsRaw || []) {
 
-            let url = null;
-            if (unlocked && e.file_path) {
-              const { data: fileData, error: fileErr } =
-                await supabaseAdmin.storage
-                  .from(process.env.EXAMS_BUCKET || "exams")
-                  .createSignedUrl(e.file_path, 300);
-              if (fileErr)
-                console.warn("   storageErr for exam", e.id, fileErr);
-              url = fileData?.signedUrl ?? null;
-            }
+  const unlocked =
+    (!e.start_time || dayjs(e.start_time).isBefore(now)) &&
+    (!e.end_time || dayjs(e.end_time).isAfter(now));
 
-            const { count } = await supabaseAdmin
-              .from("submissions")
-              .select("*", { head: true, count: "exact" })
-              .eq("exam_id", e.id);
+  // Admin MUST ALWAYS see file
+  let url = null;
+  if (e.file_path) {
+    const { data: signed } = await supabaseAdmin.storage
+      .from(EXAMS_BUCKET)
+      .createSignedUrl(e.file_path, 300);
 
-            const { data: graded, error: gradedErr } = await supabaseAdmin
-              .from("submissions")
-              .select("id")
-              .eq("exam_id", e.id)
-              .not("score", "is", null);
+    url = signed?.signedUrl ?? null;
+  }
 
-            if (gradedErr)
-              console.warn("   gradedErr for exam", e.id, gradedErr);
+  const { count } = await supabaseAdmin
+    .from("submissions")
+    .select("*", { head: true, count: "exact" })
+    .eq("exam_id", e.id);
 
-            subjectExams.push({
-              id: e.id,
-              name: e.file_name || e.title,
-              url,
-              unlocked,
-              submissions: count ?? 0,
-              graded_count: Array.isArray(graded) ? graded.length : 0,
-              createdAt: e.created_at,
-            });
-          } catch (e) {
-            console.error("   exception processing exam", e);
-          }
-        }
-      }
+  const { data: graded } = await supabaseAdmin
+    .from("submissions")
+    .select("id")
+    .eq("exam_id", e.id)
+    .not("score", "is", null);
+
+  subjectExams.push({
+    id: e.id,
+    name: e.file_name || e.title,
+    url,
+    unlocked,
+    submissions: count ?? 0,
+    graded_count: graded?.length ?? 0,
+    createdAt: e.created_at,
+    start_time: e.start_time,
+    end_time: e.end_time,
+  });
+}
 
       folders.push({
         id: s.id,
@@ -538,11 +444,10 @@ export async function getFolders(req, res) {
       });
     }
 
-    console.log("\n✅ Built folders count:", folders.length);
     return res.json({ success: true, folders });
   } catch (err) {
-    console.error("getFolders: CATCH ERROR", err);
-    return res.status(500).json({ error: err.message || String(err) });
+    console.error("getFolders:", err);
+    return res.status(500).json({ error: err.message });
   }
 }
 
@@ -573,41 +478,32 @@ export async function deleteSubject(req, res) {
   const subjectId = Number(req.params.id);
 
   try {
-    /* =========== 1. DELETE NOTES =========== */
     const { data: notes } = await supabaseAdmin
       .from("study_notes")
       .select("*")
       .eq("subject_id", subjectId);
 
     if (notes?.length) {
-      const paths = notes.map((n) => n.file_path);
-      await supabaseAdmin.storage.from(NOTES_BUCKET).remove(paths);
+      await supabaseAdmin.storage
+        .from(NOTES_BUCKET)
+        .remove(notes.map((n) => n.file_path));
     }
 
-    await supabaseAdmin
-      .from("study_notes")
-      .delete()
-      .eq("subject_id", subjectId);
+    await supabaseAdmin.from("study_notes").delete().eq("subject_id", subjectId);
 
-    /* =========== 2. DELETE EXAMS =========== */
     const { data: exams } = await supabaseAdmin
       .from("exams")
       .select("*")
       .eq("subject_id", subjectId);
 
-    const examIds = exams?.map((e) => e.id) || [];
-
-    // Delete exam PDFs
     if (exams?.length) {
-      const examPaths = exams
-        .filter((e) => e.file_path)
-        .map((e) => e.file_path);
-
-      if (examPaths.length > 0)
+      const examPaths = exams.filter((e) => e.file_path).map((e) => e.file_path);
+      if (examPaths.length)
         await supabaseAdmin.storage.from(EXAMS_BUCKET).remove(examPaths);
     }
 
-    /* =========== 3. DELETE SUBMISSIONS =========== */
+    const examIds = exams?.map((e) => e.id) || [];
+
     const { data: submissions } = await supabaseAdmin
       .from("submissions")
       .select("*")
@@ -617,19 +513,14 @@ export async function deleteSubject(req, res) {
       const submissionPaths = submissions
         .filter((s) => s.answer_file_path)
         .map((s) => s.answer_file_path);
-
-      if (submissionPaths.length > 0)
+      if (submissionPaths.length)
         await supabaseAdmin.storage
           .from(SUBMISSION_BUCKET)
           .remove(submissionPaths);
     }
 
     await supabaseAdmin.from("submissions").delete().in("exam_id", examIds);
-
-    /* =========== 4. DELETE EXAMS (DB) =========== */
     await supabaseAdmin.from("exams").delete().eq("subject_id", subjectId);
-
-    /* =========== 5. DELETE SUBJECT =========== */
     await supabaseAdmin.from("subjects").delete().eq("id", subjectId);
 
     return res.json({
@@ -641,6 +532,7 @@ export async function deleteSubject(req, res) {
     return res.status(500).json({ error: err.message });
   }
 }
+
 export async function updateExam(req, res) {
   try {
     const examId = Number(req.params.id);
@@ -663,6 +555,28 @@ export async function updateExam(req, res) {
     return res.json({ success: true, exam: data });
   } catch (err) {
     console.error("updateExam:", err);
+    return res.status(500).json({ error: err.message });
+  }
+}
+export async function gradeSubmission(req, res) {
+  try {
+    const submissionId = Number(req.params.id);
+
+    const { data, error } = await supabaseAdmin
+      .from("submissions")
+      .update({
+        score: req.body.score ?? null,
+        admin_message: req.body.admin_message ?? null,
+      })
+      .eq("id", submissionId)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return res.json({ success: true, submission: data });
+  } catch (err) {
+    console.error("gradeSubmission:", err);
     return res.status(500).json({ error: err.message });
   }
 }
