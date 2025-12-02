@@ -23,6 +23,7 @@ import {
   getLastPage,
   saveLastPage,
   saveStudySession,
+  updateCollection,
 } from "../controllers/libraryController.js";
 
 const router = express.Router();
@@ -55,9 +56,11 @@ router.delete("/highlights/:id", deleteHighlight);
 // ----- 📂 Collection Routes -----
 router.post("/collections", createCollection);
 router.get("/collections", getAllCollections);
-router.get("/collections/:id/", getCollectionBooks);
-router.post("/collections/:id/add/:bookId", addBookToCollection);
+router.get("/collections/:id/books", getCollectionBooks);
+router.post("/collections/:id/add", addBookToCollection);
+
 router.delete("/collections/:id/remove/:bookId", removeBookFromCollection);
 router.delete("/collections/:id", deleteCollection);
+router.put("/collections/:id", updateCollection);
 
 export default router;

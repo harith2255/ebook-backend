@@ -254,82 +254,137 @@ export const getAllCollections = async (req, res) => {
 };
 
 export const getCollectionBooks = async (req, res) => {
-  const { id } = req.params;
+  try {
+    const collectionId = req.params.id;
 
-  const { data, error } = await supabase
-    .from("collection_books")
-    .select(`
-      book_id,
-      ebooks:ebooks (
-        id,
-        title,
-        author,
-        category,
-        description,
-        cover_url,
-        file_url,
-        pages,
-        price
-      )
-    `)
-    .eq("collection_id", id);
+    const { data, error } = await supabase
+      .from("collection_books")
+      .select(`
+        book_id,
+        ebooks (
+          id,
+          title,
+          author,
+          category,
+          cover_url,
+          pages
+        )
+      `)
+      .eq("collection_id", collectionId);
 
-  if (error) return res.status(400).json({ error: error.message });
+    if (error) throw error;
 
-  // Flatten response so UI works
-  const formatted = data.map((item) => ({
-    id: item.ebooks.id,
-    title: item.ebooks.title,
-    author: item.ebooks.author,
-    category: item.ebooks.category,
-    description: item.ebooks.description,
-    cover_url: item.ebooks.cover_url,
-    file_url: item.ebooks.file_url,
-    pages: item.ebooks.pages,
-    price: item.ebooks.price,
-    progress: 0, // optional, library progress not stored here
-    purchased: null, // optional
-  }));
+    const books = (data || [])
+      .filter((entry) => entry.ebooks !== null)
+      .map((entry) => ({
+        id: entry.ebooks.id,
+        title: entry.ebooks.title,
+        author: entry.ebooks.author,
+        category: entry.ebooks.category,
+        cover_url: entry.ebooks.cover_url || "https://placehold.co/300x400",
+        pages: entry.ebooks.pages,
+      }));
 
-  res.json(formatted);
+    res.json(books);
+  } catch (err) {
+    console.error("ERROR getCollectionBooks:", err);
+    res.status(500).json({ error: "Failed to fetch collection books" });
+  }
 };
 
 export const addBookToCollection = async (req, res) => {
-  const { id, bookId } = req.params;
+  try {
+    const collectionId = req.params.id;
+    const { book_id } = req.body;
 
-  const { error } = await supabase
-    .from("collection_books")
-    .insert([{ collection_id: id, book_id: bookId }]);
+    if (!book_id) {
+      return res.status(400).json({ error: "book_id is required" });
+    }
 
-  if (error) return res.status(400).json({ error: error.message });
+    // 👉 1️⃣ Check if already exists
+    const { data: existing, error: existingErr } = await supabase
+      .from("collection_books")
+      .select("id")
+      .eq("collection_id", collectionId)
+      .eq("book_id", book_id)
+      .maybeSingle();
 
-  res.json({ message: "Book added to collection" });
-};
+    if (existingErr) throw existingErr;
 
-export const removeBookFromCollection = async (req, res) => {
-  const { id, bookId } = req.params;
+    if (existing) {
+      return res.json({
+        message: "Book already in this collection",
+        alreadyAdded: true,
+      });
+    }
 
-  const { error } = await supabase
-    .from("collection_books")
-    .delete()
-    .eq("collection_id", id)
-    .eq("book_id", bookId);
+    // 👉 2️⃣ Insert only if not exists
+    const { error } = await supabase.from("collection_books").insert({
+      collection_id: collectionId,
+      book_id: book_id,
+    });
 
-  if (error) return res.status(400).json({ error: error.message });
+    if (error) throw error;
 
-  res.json({ message: "Book removed from collection" });
+    res.json({ message: "Book added to collection", alreadyAdded: false });
+  } catch (err) {
+    console.error("ADD BOOK TO COLLECTION ERROR:", err);
+    res.status(500).json({ error: "Failed to add book" });
+  }
 };
 
 export const deleteCollection = async (req, res) => {
-  const { id } = req.params;
+  try {
+    const collectionId = req.params.id;
 
-  const { error } = await supabase.from("collections").delete().eq("id", id);
+    // Delete books inside collection
+    await supabase.from("collection_books").delete().eq("collection_id", collectionId);
+
+    // Delete collection
+    await supabase.from("collections").delete().eq("id", collectionId);
+
+    res.json({ message: "Collection deleted successfully" });
+  } catch (err) {
+    console.error("DELETE COLLECTION ERROR:", err);
+    res.status(500).json({ error: "Failed to delete collection" });
+  }
+};
+/* ============================================
+   ❌ REMOVE BOOK FROM COLLECTION
+============================================ */
+export const removeBookFromCollection = async (req, res) => {
+  try {
+    const { id: collectionId, bookId } = req.params;
+
+    const { error } = await supabase
+      .from("collection_books")
+      .delete()
+      .eq("collection_id", collectionId)
+      .eq("book_id", bookId);
+
+    if (error) throw error;
+
+    res.json({ message: "Book removed from collection" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to remove book" });
+  }
+};
+/* ============================================
+   ✏️ UPDATE COLLECTION NAME
+============================================ */
+export const updateCollection = async (req, res) => {
+  const { id } = req.params;
+  const { name } = req.body;
+
+  const { error } = await supabase
+    .from("collections")
+    .update({ name })
+    .eq("id", id);
 
   if (error) return res.status(400).json({ error: error.message });
 
-  res.json({ message: "Collection deleted" });
+  res.json({ message: "Collection renamed" });
 };
-
 /* ============================================
    🔥 SMART UPDATE READING PROGRESS
 ============================================ */

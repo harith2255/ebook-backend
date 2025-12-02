@@ -110,21 +110,32 @@ export const getUserLibrary = async (req, res) => {
 export const updateProgress = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { bookId, progress } = req.body;
+    const { bookId } = req.params;   // ✔ from URL
+    const { progress } = req.body;   // ✔ from body
+
+    if (!progress && progress !== 0) {
+      return res.status(400).json({ error: "Progress value required" });
+    }
 
     const { error } = await supabase
       .from("user_library")
-      .update({ progress, last_read: new Date().toISOString() })
+      .update({
+        progress,
+        last_read: new Date().toISOString(),
+        completed_at: progress === 100 ? new Date().toISOString() : null
+      })
       .eq("user_id", userId)
       .eq("book_id", bookId);
 
     if (error) throw error;
 
-    res.json({ success: true });
+    res.json({ success: true, progress });
   } catch (err) {
+    console.error("updateProgress error:", err);
     res.status(500).json({ error: err.message });
   }
 };
+
 
 /* ============================
    LOG BOOK READ EVENT (DRM)

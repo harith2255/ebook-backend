@@ -7,8 +7,18 @@ export const drmCheck = async (req, res, next) => {
     const deviceInfo = req.headers["user-agent"];
     const ip = req.ip;
 
-    const bookId = req.params.id || req.body.bookId;
-    const noteId = req.params.id || req.body.noteId;
+   const bookId =
+  req.params.bookId ||
+  req.params.id ||
+  req.body.book_id ||
+  req.body.bookId;
+
+const noteId =
+  req.params.noteId ||
+  req.params.id ||
+  req.body.note_id ||
+  req.body.noteId;
+
 
     /* ======================================================
        1) LOAD DRM SETTINGS

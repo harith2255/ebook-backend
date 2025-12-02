@@ -91,10 +91,23 @@ export async function login(req, res) {
     let role = profile?.role || "User";
 
     // Super admin override
-    if (email === process.env.SUPER_ADMIN_EMAIL) {
-      role = "super_admin";
-      await supabase.from("profiles").upsert([{ id: userId, email, role }]);
-    }
+   if (email === process.env.SUPER_ADMIN_EMAIL) {
+  role = "super_admin";
+
+  // Add role to JWT claims (app_metadata)
+  const { error: metadataError } = await supabase.auth.admin.updateUserById(userId, {
+    app_metadata: { role: "super_admin" }
+  });
+
+  if (metadataError) {
+    console.error("Metadata update error:", metadataError);
+  }
+
+  // Keep profiles table in sync
+  await supabase.from("profiles").upsert([{ id: userId, role }]);
+}
+
+
 
     const fullName =
       profile?.full_name ||
