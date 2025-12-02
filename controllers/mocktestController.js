@@ -1,168 +1,209 @@
 import supabase from "../utils/supabaseClient.js";
 
-// 📌 Fetch Available + Upcoming Tests
+/* ======================================================
+   GET AVAILABLE + UPCOMING TESTS
+====================================================== */
 export const getAvailableTests = async (req, res) => {
   try {
     const { data, error } = await supabase
       .from("mock_tests")
-      .select("*, mcqs")
-      .order("start_time", { ascending: true }); // sort upcoming first
+      .select("id, title, subject, difficulty, duration_minutes, total_questions, participants, start_time")
+      .order("start_time", { ascending: true });
 
     if (error) return res.status(400).json({ error: error.message });
 
-    return res.json(data);  // MUST RETURN ARRAY
-  } catch (e) {
+    return res.json(data ?? []);
+  } catch (err) {
+    console.error(err);
     return res.status(500).json({ error: "Failed to fetch tests" });
   }
 };
 
 
-// 📌 Fetch Test Details
+/* ======================================================
+   GET TEST DETAILS
+====================================================== */
 export const getTestDetails = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const { data, error } = await supabase
+    // get test metadata
+    const { data: test, error: testErr } = await supabase
       .from("mock_tests")
-      .select("id, title, subject, duration_minutes, total_questions, start_time, mcqs")
+      .select("id, title, subject, duration_minutes, total_questions, start_time")
       .eq("id", id)
       .single();
 
-    if (error) return res.status(400).json({ error: error.message });
+    if (testErr || !test) {
+      return res.status(404).json({ error: "Test not found" });
+    }
 
-    return res.json(data);
+    // fetch questions
+    const { data: mcqs, error: qErr } = await supabase
+      .from("mock_test_questions")
+      .select("id, question, option_a, option_b, option_c, option_d, correct_option")
+      .eq("test_id", id)
+      .order("id");
+
+    if (qErr) {
+      return res.status(400).json({ error: qErr.message });
+    }
+
+    // attach to test
+    test.mcqs = mcqs || [];
+
+    return res.json(test);
 
   } catch (err) {
+    console.error(err);
     return res.status(500).json({ error: "Failed to load test details" });
   }
 };
 
-// 📌 Ongoing Tests
+
+
+
+/* ======================================================
+   ONGOING TESTS FOR USER
+====================================================== */
 export const getOngoingTests = async (req, res) => {
-  const userId = req.user.id;
+  try {
+    const userId = req.user.id;
 
-  const { data, error } = await supabase
-    .from("mock_attempts")
-    .select(`
-      id,
-      test_id,
-      completed_questions,
-      mock_tests(*)
-    `)
-    .eq("user_id", userId)
-    .eq("status", "ongoing");
+    const { data, error } = await supabase
+      .from("mock_attempts")
+      .select(`
+        id,
+        test_id,
+        completed_questions,
+        mock_tests (
+          title,
+          subject,
+          difficulty,
+          duration_minutes,
+          total_questions,
+          participants
+        )
+      `)
+      .eq("user_id", userId)
+      .eq("status", "in_progress");
 
-  if (error) return res.status(400).json({ error: error.message });
+    if (error) return res.status(400).json({ error: error.message });
 
-  res.json(data);
+    return res.json(data ?? []);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Failed to fetch ongoing tests" });
+  }
 };
 
-// 📌 Completed Tests
+
+
+/* ======================================================
+   COMPLETED TESTS FOR USER
+====================================================== */
 export const getCompletedTests = async (req, res) => {
-  const userId = req.user.id;
+  try {
+    const userId = req.user.id;
 
-  const { data, error } = await supabase
-    .from("mock_attempts")
-    .select(`
-      id,
-      test_id,
-      score,
-      rank,
-      completed_at,
-      mock_tests(*)
-    `)
-    .eq("user_id", userId)
-    .eq("status", "completed");
+    const { data, error } = await supabase
+      .from("mock_attempts")
+      .select(`
+        id,
+        test_id,
+        score,
+        rank,
+        time_spent,
+        completed_at,
+        mock_tests (
+          title,
+          subject,
+          duration_minutes,
+          participants
+        )
+      `)
+      .eq("user_id", userId)
+      .eq("status", "completed")
+      .order("completed_at", { ascending: false });
 
-  if (error) return res.status(400).json({ error: error.message });
+    if (error) return res.status(400).json({ error: error.message });
 
-  res.json(data);
+    return res.json(data ?? []);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Failed to fetch completed tests" });
+  }
 };
 
-// 📌 Leaderboard
+
+
+/* ======================================================
+   LEADERBOARD
+====================================================== */
 export const getLeaderboard = async (req, res) => {
   try {
     const { data, error } = await supabase
       .from("mock_leaderboard")
-      .select("user_id, display_name, average_score, tests_taken")
-      .order("average_score", { ascending: false });
+      .select(`
+        user_id,
+        display_name,
+        average_score,
+        tests_taken
+      `)
+      .order("average_score", { ascending: false })
+      .limit(50);
 
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) return res.status(400).json({ error: error.message });
 
-    return res.json(data);
+    return res.json(data ?? []);
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    console.error(err);
+    return res.status(500).json({ error: "Failed to fetch leaderboard" });
   }
 };
 
-// 📌 Stats
+
+/* ======================================================
+   USER STATS (SMART AGGREGATE)
+====================================================== */
 export const getStats = async (req, res) => {
-  const userId = req.user.id;
-
-  const { data, error } = await supabase
-    .from("mock_attempts")
-    .select("score, rank, time_spent")
-    .eq("user_id", userId);
-
-  if (error) return res.status(400).json({ error: error.message });
-
-  const testsTaken = data.length;
-  const avgScore = data.length ? (data.reduce((a, b) => a + b.score, 0) / data.length) : 0;
-  const bestRank = data.length ? Math.min(...data.map(x => x.rank ?? 9999)) : null;
-  const totalStudyTime = data.reduce((a, b) => a + (b.time_spent || 0), 0);
-
-  res.json({
-    tests_taken: testsTaken,
-    average_score: Math.round(avgScore),
-    best_rank: bestRank,
-    total_study_time: totalStudyTime
-  });
-};
-
-// 📌 Start Test
-export const startTest = async (req, res) => {
   try {
-    const { test_id } = req.body;
-    const user_id = req.user.id;
+    const userId = req.user.id;
 
-    if (!test_id) return res.status(400).json({ error: "Missing test_id" });
+    const { data, error } = await supabase
+      .from("mock_attempts")
+      .select("score, rank, time_spent")
+      .eq("user_id", userId)
+      .eq("status", "completed");
 
-    // fetch test
-    const { data: test, error: testErr } = await supabase
-      .from("mock_tests")
-      .select("*, mcqs")
-      .eq("id", test_id)
-      .single();
+    if (error) return res.status(400).json({ error: error.message });
 
-    if (testErr) return res.status(400).json({ error: testErr.message });
-
-    // Upcoming tests: block start early
-    if (test.start_time && new Date(test.start_time) > new Date()) {
-      return res.status(400).json({ error: "This test has not started yet." });
+    if (!data?.length) {
+      return res.json({
+        tests_taken: 0,
+        average_score: 0,
+        best_rank: null,
+        total_study_time: 0,
+      });
     }
 
-    // create attempt
-    const { data: attempt, error: err1 } = await supabase
-      .from("mock_attempts")
-      .insert({
-        user_id,
-        test_id,
-        status: "ongoing",
-        started_at: new Date(),
-        completed_questions: 0,
-        score: 0
-      })
-      .select()
-      .single();
+    const scores = data.map(x => x.score || 0);
+    const ranks = data.map(x => x.rank).filter(Boolean);
+    const time = data.map(x => x.time_spent || 0);
 
-    if (err1) return res.status(400).json({ error: err1.message });
+    const tests_taken = data.length;
+    const average_score = Math.round(scores.reduce((a, b) => a + b, 0) / tests_taken);
+    const best_rank = ranks.length ? Math.min(...ranks) : null;
+    const total_study_time = time.reduce((a, b) => a + b, 0);
 
-    // increment participants
-    await supabase.rpc("increment_participants", { testid: test_id });
-
-    return res.json({ attempt, test });
-
-  } catch (error) {
-    return res.status(500).json({ error: error.message });
+    return res.json({
+      tests_taken,
+      average_score,
+      best_rank,
+      total_study_time
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Failed to fetch stats" });
   }
 };

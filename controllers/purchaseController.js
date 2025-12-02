@@ -1,4 +1,5 @@
 import supabase from "../utils/supabaseClient.js";
+import crypto from "crypto";
 
 /* ============================================================
    1️⃣  UNIFIED PURCHASE HANDLER (BOOKS + NOTES)
@@ -17,6 +18,17 @@ export const unifiedPurchase = async (req, res) => {
 
     for (const item of items) {
       try {
+        // 🔒 Guard: skip items without an ID
+        if (!item?.id) {
+          console.warn("⚠️ Skipping item with no ID:", item);
+          errors.push({
+            id: null,
+            type: item?.type ?? "unknown",
+            error: "Missing ID",
+          });
+          continue;
+        }
+
         if (item.type === "book") {
           const result = await processBookPurchase(userId, item.id);
 
@@ -30,7 +42,7 @@ export const unifiedPurchase = async (req, res) => {
           results.push({
             type: "book",
             id: item.id,
-            purchased: true,
+            purchased: !result?.skipped,
             alreadyPurchased: !!result?.alreadyPurchased,
           });
         }
@@ -47,16 +59,18 @@ export const unifiedPurchase = async (req, res) => {
           results.push({
             type: "note",
             id: item.id,
-            purchased: true,
+            purchased: !result?.skipped,
             alreadyPurchased: !!result?.alreadyPurchased,
           });
         }
       } catch (err) {
+        console.error("Item purchase error:", err);
         errors.push({ id: item.id, type: item.type, error: err.message });
       }
     }
 
     if (errors.length > 0) {
+      // 207 for partial success
       return res.status(207).json({ results, errors });
     }
 
@@ -75,7 +89,11 @@ async function processBookPurchase(userId, bookId) {
   console.log("🟦 USER ID:", userId);
   console.log("🟥 BOOK ID:", bookId);
 
-  if (!bookId) throw new Error("Book ID is required");
+  // 🔒 Guard against undefined / null IDs
+  if (!bookId) {
+    console.warn("⚠️ processBookPurchase skipped: missing bookId");
+    return { skipped: true };
+  }
 
   const { data: exists, error: existsError } = await supabase
     .from("book_sales")
@@ -115,23 +133,27 @@ async function processBookPurchase(userId, bookId) {
    3️⃣ PROCESS NOTE PURCHASE
 =============================================================== */
 async function processNotePurchase(userId, noteId) {
-  if (!noteId) throw new Error("Note ID required");
+  // Optional: mirror the same guard as books
+  if (!noteId) {
+    console.warn("⚠️ processNotePurchase skipped: missing noteId");
+    return { skipped: true };
+  }
 
-  const numericId = Number(noteId); // FIXED
+  const numericId = Number(noteId);
 
   const { data: exists } = await supabase
     .from("notes_purchase")
     .select("id")
     .eq("user_id", userId)
-    .eq("note_id", numericId)   // FIXED
+    .eq("note_id", numericId)
     .maybeSingle();
 
   if (exists) return { alreadyPurchased: true };
 
   const { error } = await supabase.from("notes_purchase").insert({
-    id: crypto.randomUUID(),     // REQUIRED because id = uuid
+    id: crypto.randomUUID(), // REQUIRED because id = uuid
     user_id: userId,
-    note_id: numericId,          // FIXED
+    note_id: numericId,
     purchased_at: new Date().toISOString(),
   });
 
@@ -139,7 +161,6 @@ async function processNotePurchase(userId, noteId) {
 
   return { success: true };
 }
-
 
 /* ============================================================
    4️⃣ CHECK PURCHASE STATUS → returns { purchased: true/false }
@@ -159,16 +180,14 @@ export const checkPurchase = async (req, res) => {
 
       return res.json({ purchased: !!data });
     }
-if (noteId) {
-  const { data } = await supabase
-    .from("notes_purchase")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("note_id", Number(noteId))   // FIXED
-    .maybeSingle();
 
-
-
+    if (noteId) {
+      const { data } = await supabase
+        .from("notes_purchase")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("note_id", Number(noteId))
+        .maybeSingle();
 
       return res.json({ purchased: !!data });
     }
@@ -189,10 +208,12 @@ export const getPurchasedBooks = async (req, res) => {
 
     const { data, error } = await supabase
       .from("book_sales")
-      .select(`
-        *,
+      .select(
+        `
+        * ,
         books(*)
-      `)
+      `
+      )
       .eq("user_id", userId);
 
     if (error) throw error;
@@ -243,10 +264,9 @@ export const getPurchasedNoteIds = async (req, res) => {
 
     if (error) throw error;
 
-    return res.json(data.map((row) => Number(row.note_id))); // FIXED
+    return res.json(data.map((row) => Number(row.note_id)));
   } catch (err) {
     console.error("getPurchasedNoteIds error:", err);
     return res.status(500).json([]);
   }
 };
-

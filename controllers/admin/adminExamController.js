@@ -1,5 +1,6 @@
 // src/controllers/admin/adminExamController.js
-import { supabaseAdmin } from "../../utils/supabaseClient.js";
+ import { supabaseAdmin as supabase } from "../../utils/supabaseClient.js";
+
 import { v4 as uuid } from "uuid";
 import dayjs from "dayjs";
 
@@ -15,7 +16,7 @@ const SUBMISSION_BUCKET = "submission-files";
 /* -------------------------------------------------------------------------- */
 async function findOrCreateSubject(label, value) {
   try {
-    const { data: existing } = await supabaseAdmin
+    const { data: existing } = await supabase
       .from("subjects")
       .select("*")
       .eq("value", value)
@@ -23,7 +24,7 @@ async function findOrCreateSubject(label, value) {
 
     if (existing) return existing;
 
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await supabase
       .from("subjects")
       .insert({ label, value })
       .select()
@@ -43,7 +44,7 @@ async function findOrCreateSubject(label, value) {
 /* -------------------------------------------------------------------------- */
 export async function listSubjects(req, res) {
   try {
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await supabase
       .from("subjects")
       .select("*")
       .order("label");
@@ -74,7 +75,7 @@ export async function uploadNote(req, res) {
     const filename = `${uuid()}-${req.file.originalname}`;
     const path = `study_notes/${filename}`;
 
-    const { error: uploadErr } = await supabaseAdmin.storage
+    const { error: uploadErr } = await supabase.storage
       .from(NOTES_BUCKET)
       .upload(path, req.file.buffer, {
         contentType: req.file.mimetype,
@@ -82,7 +83,7 @@ export async function uploadNote(req, res) {
 
     if (uploadErr) throw uploadErr;
 
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await supabase
       .from("study_notes")
       .insert([
         {
@@ -118,7 +119,7 @@ export async function createExam(req, res) {
 
     const subject = await findOrCreateSubject(label, value);
 
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await supabase
       .from("exams")
       .insert([
         {
@@ -154,7 +155,7 @@ export async function uploadExamFile(req, res) {
     const filename = `${uuid()}-${req.file.originalname}`;
     const path = `exams/${filename}`;
 
-    const { error: uploadErr } = await supabaseAdmin.storage
+    const { error: uploadErr } = await supabase.storage
       .from(EXAMS_BUCKET)
       .upload(path, req.file.buffer, {
         contentType: req.file.mimetype,
@@ -163,7 +164,7 @@ export async function uploadExamFile(req, res) {
 
     if (uploadErr) throw uploadErr;
 
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await supabase
       .from("exams")
       .update({
         file_path: path,
@@ -189,7 +190,7 @@ export async function uploadExamFile(req, res) {
 // GET ALL EXAMS (SAFE) - patched
 export async function listExams(req, res) {
   try {
-    const { data: exams, error } = await supabaseAdmin
+    const { data: exams, error } = await supabase
       .from("exams")
       .select("*")
       .order("start_time");
@@ -207,7 +208,7 @@ export async function listExams(req, res) {
         let view_url = null;
         if (unlocked && exam.file_path) {
           try {
-            const { data: signed } = await supabaseAdmin.storage
+            const { data: signed } = await supabase.storage
               .from(EXAMS_BUCKET) // <-- use correct constant
               .createSignedUrl(exam.file_path, 300);
 
@@ -245,7 +246,7 @@ export async function attendExam(req, res) {
   try {
     const examId = Number(req.params.id);
 
-    const { data: exam } = await supabaseAdmin
+    const { data: exam } = await supabase
       .from("exams")
       .select("*")
       .eq("id", examId)
@@ -267,7 +268,7 @@ export async function attendExam(req, res) {
       const filename = `${uuid()}-${req.file.originalname}`;
       const path = `submissions/${filename}`;
 
-      await supabaseAdmin.storage
+      await supabase.storage
         .from(SUBMISSION_BUCKET)
         .upload(path, req.file.buffer, {
           contentType: req.file.mimetype,
@@ -276,7 +277,7 @@ export async function attendExam(req, res) {
       answer_file_path = path;
     }
 
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await supabase
       .from("submissions")
       .insert([
         {
@@ -306,7 +307,7 @@ export async function getExamSubmissions(req, res) {
     const examId = Number(req.params.id);
 
     // Get submissions WITHOUT join (because FK to auth.users can't auto-join)
-    const { data: submissions, error } = await supabaseAdmin
+    const { data: submissions, error } = await supabase
       .from("submissions")
       .select("*")
       .eq("exam_id", examId)
@@ -318,7 +319,7 @@ export async function getExamSubmissions(req, res) {
     const enriched = await Promise.all(
       submissions.map(async (s) => {
         // fetch email
-        const { data: userData } = await supabaseAdmin.auth.admin.getUserById(
+        const { data: userData } = await supabase.auth.admin.getUserById(
           s.user_id
         );
 
@@ -327,7 +328,7 @@ export async function getExamSubmissions(req, res) {
         // signed URL if file exists
         let url = null;
         if (s.answer_file_path) {
-          const { data: signed } = await supabaseAdmin.storage
+          const { data: signed } = await supabase.storage
             .from("submission-files")
             .createSignedUrl(s.answer_file_path, 300);
           url = signed?.signedUrl ?? null;
@@ -360,7 +361,7 @@ export async function getFolders(req, res) {
   });
 
   try {
-    const { data: subjects } = await supabaseAdmin
+    const { data: subjects } = await supabase
       .from("subjects")
       .select("*")
       .order("label");
@@ -369,7 +370,7 @@ export async function getFolders(req, res) {
     const folders = [];
 
     for (const s of subjects || []) {
-      const { data: subjectNotesRaw } = await supabaseAdmin
+      const { data: subjectNotesRaw } = await supabase
         .from("study_notes")
         .select("*")
         .eq("subject_id", s.id)
@@ -377,7 +378,7 @@ export async function getFolders(req, res) {
 
       const subjectNotes = [];
       for (const n of subjectNotesRaw || []) {
-        const { data: storageData } = await supabaseAdmin.storage
+        const { data: storageData } = await supabase.storage
           .from(NOTES_BUCKET)
           .createSignedUrl(n.file_path, 300);
 
@@ -389,7 +390,7 @@ export async function getFolders(req, res) {
         });
       }
 
-      const { data: subjectExamsRaw } = await supabaseAdmin
+      const { data: subjectExamsRaw } = await supabase
         .from("exams")
         .select("*")
         .eq("subject_id", s.id)
@@ -405,19 +406,19 @@ for (const e of subjectExamsRaw || []) {
   // Admin MUST ALWAYS see file
   let url = null;
   if (e.file_path) {
-    const { data: signed } = await supabaseAdmin.storage
+    const { data: signed } = await supabase.storage
       .from(EXAMS_BUCKET)
       .createSignedUrl(e.file_path, 300);
 
     url = signed?.signedUrl ?? null;
   }
 
-  const { count } = await supabaseAdmin
+  const { count } = await supabase
     .from("submissions")
     .select("*", { head: true, count: "exact" })
     .eq("exam_id", e.id);
 
-  const { data: graded } = await supabaseAdmin
+  const { data: graded } = await supabase
     .from("submissions")
     .select("id")
     .eq("exam_id", e.id)
@@ -478,20 +479,20 @@ export async function deleteSubject(req, res) {
   const subjectId = Number(req.params.id);
 
   try {
-    const { data: notes } = await supabaseAdmin
+    const { data: notes } = await supabase
       .from("study_notes")
       .select("*")
       .eq("subject_id", subjectId);
 
     if (notes?.length) {
-      await supabaseAdmin.storage
+      await supabase.storage
         .from(NOTES_BUCKET)
         .remove(notes.map((n) => n.file_path));
     }
 
-    await supabaseAdmin.from("study_notes").delete().eq("subject_id", subjectId);
+    await supabase.from("study_notes").delete().eq("subject_id", subjectId);
 
-    const { data: exams } = await supabaseAdmin
+    const { data: exams } = await supabase
       .from("exams")
       .select("*")
       .eq("subject_id", subjectId);
@@ -499,12 +500,12 @@ export async function deleteSubject(req, res) {
     if (exams?.length) {
       const examPaths = exams.filter((e) => e.file_path).map((e) => e.file_path);
       if (examPaths.length)
-        await supabaseAdmin.storage.from(EXAMS_BUCKET).remove(examPaths);
+        await supabase.storage.from(EXAMS_BUCKET).remove(examPaths);
     }
 
     const examIds = exams?.map((e) => e.id) || [];
 
-    const { data: submissions } = await supabaseAdmin
+    const { data: submissions } = await supabase
       .from("submissions")
       .select("*")
       .in("exam_id", examIds);
@@ -514,14 +515,14 @@ export async function deleteSubject(req, res) {
         .filter((s) => s.answer_file_path)
         .map((s) => s.answer_file_path);
       if (submissionPaths.length)
-        await supabaseAdmin.storage
+        await supabase.storage
           .from(SUBMISSION_BUCKET)
           .remove(submissionPaths);
     }
 
-    await supabaseAdmin.from("submissions").delete().in("exam_id", examIds);
-    await supabaseAdmin.from("exams").delete().eq("subject_id", subjectId);
-    await supabaseAdmin.from("subjects").delete().eq("id", subjectId);
+    await supabase.from("submissions").delete().in("exam_id", examIds);
+    await supabase.from("exams").delete().eq("subject_id", subjectId);
+    await supabase.from("subjects").delete().eq("id", subjectId);
 
     return res.json({
       success: true,
@@ -538,7 +539,7 @@ export async function updateExam(req, res) {
     const examId = Number(req.params.id);
     const { title, description, start_time, end_time } = req.body;
 
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await supabase
       .from("exams")
       .update({
         title,
@@ -562,7 +563,7 @@ export async function gradeSubmission(req, res) {
   try {
     const submissionId = Number(req.params.id);
 
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await supabase
       .from("submissions")
       .update({
         score: req.body.score ?? null,
