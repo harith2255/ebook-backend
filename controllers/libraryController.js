@@ -392,62 +392,89 @@ export const updateReadingProgress = async (req, res) => {
   try {
     const userId = req.user.id;
     const { bookId } = req.params;
-    const { progress } = req.body;
+    let { progress, last_page } = req.body;
 
-    if (typeof progress !== "number") {
+    if (typeof progress !== "number" || progress < 0)
       return res.status(400).json({ error: "Invalid progress" });
+
+    if (!last_page || last_page < 1) last_page = 1;
+
+    // convert fractional value
+    if (progress > 0 && progress < 1) {
+      progress = progress * 100;
     }
+
+    progress = Math.min(100, Math.round(progress));
 
     const now = new Date().toISOString();
 
-    const { data: existing } = await supabase
+    const { data: existing, error: exErr } = await supabase
       .from("user_library")
       .select("id, progress")
       .eq("user_id", userId)
       .eq("book_id", bookId)
       .maybeSingle();
 
-    if (!existing) {
-      return res.status(404).json({ error: "Library entry not found" });
-    }
+    if (exErr) return res.status(400).json({ error: exErr.message });
 
-    if (existing.progress >= progress) {
-      console.log("Ignored update (regression) ->", existing.progress, progress);
+    if (!existing)
+      return res.status(404).json({ error: "Not in library" });
+
+    // ignore regression
+    if (progress < existing.progress) {
       return res.json({
         message: "Ignored regression",
         progress: existing.progress,
+        last_page,
       });
     }
 
-    console.log("UPDATE PROGRESS REQUEST", { userId, bookId, progress });
-
-    const updates = {
-      progress,
-      completed_at: progress === 100 ? now : null,
-    };
-
     const { error } = await supabase
       .from("user_library")
-      .update(updates)
+      .update({
+        progress,
+        last_page,
+        completed_at: progress === 100 ? now : null,
+      })
       .eq("user_id", userId)
       .eq("book_id", bookId);
 
     if (error) return res.status(400).json({ error: error.message });
 
-    console.log("DB UPDATED SUCCESSFULLY:", userId, bookId, progress);
-
     return res.json({
       message: "Progress updated",
       progress,
+      last_page,
       completed: progress === 100,
     });
 
   } catch (err) {
-    console.error("Progress update failed:", err);
+    console.error(err);
     return res.status(500).json({ error: "Failed to update progress" });
   }
 };
 
+
+
+export const getCollectionBookIds = async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("collection_books")
+      .select("book_id");
+
+    if (error) {
+      console.error("getCollectionBookIds error:", error);
+      return res.status(400).json({ error: error.message });
+    }
+
+    const ids = data.map((x) => x.book_id);
+    return res.json(ids);
+
+  } catch (err) {
+    console.error("getCollectionBookIds failed:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+};
 
 
 

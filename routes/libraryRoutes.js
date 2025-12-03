@@ -24,6 +24,7 @@ import {
   saveLastPage,
   saveStudySession,
   updateCollection,
+  getCollectionBookIds,
 } from "../controllers/libraryController.js";
 
 const router = express.Router();
@@ -56,6 +57,7 @@ router.delete("/highlights/:id", deleteHighlight);
 // ----- 📂 Collection Routes -----
 router.post("/collections", createCollection);
 router.get("/collections", getAllCollections);
+router.get("/collections/book-ids", getCollectionBookIds);
 router.get("/collections/:id/books", getCollectionBooks);
 router.post("/collections/:id/add", addBookToCollection);
 
