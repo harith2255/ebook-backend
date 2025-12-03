@@ -11,13 +11,14 @@ import { verifySupabaseAuth } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-// Public
-router.get("/plans", getPlans);
-router.get("/:id", getSinglePlan);
+
 
 // Protected
 router.get("/active", verifySupabaseAuth.required, getActiveSubscription);
 router.post("/upgrade", verifySupabaseAuth.required, upgradeSubscription);
 router.post("/cancel", verifySupabaseAuth.required, cancelSubscription);
+// Public
+router.get("/plans", getPlans);
+router.get("/:id", getSinglePlan);
 
 export default router;

@@ -28,15 +28,24 @@ export const getActiveSubscription = async (req, res) => {
     const userId = req.user.id;
 
     const { data, error } = await supabase
-      .from("user_subscriptions")
-      .select("*, plan:subscription_plans(*)")
-      .eq("user_id", userId)
-      .eq("status", "active")
-      .order("started_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+  .from("user_subscriptions")
+  .select("*, plan:subscription_plans(*)")
+  .eq("user_id", userId)
+  .eq("status", "active")
+  .order("started_at", { ascending: false })
+  .limit(1)
+  .maybeSingle();
 
-    if (error) throw error;
+if (error) {
+  console.error("SUPABASE ERROR:", error);
+  return res.status(500).json({
+    error: error.message,
+    details: error.details,
+    hint: error.hint,
+    code: error.code,
+  });
+}
+
 
     if (!data) return res.json(null);
 

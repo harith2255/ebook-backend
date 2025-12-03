@@ -395,33 +395,36 @@ export const updateReadingProgress = async (req, res) => {
     const { progress } = req.body;
 
     if (typeof progress !== "number") {
-      return res.status(400).json({ error: "Invalid 'progress' — expected number" });
+      return res.status(400).json({ error: "Invalid progress" });
     }
 
     const now = new Date().toISOString();
 
-    // Only update allowed columns that exist in DB
-    const updates = {
-      progress,
-      completed_at: progress === 100 ? now : null
-    };
-
-    // Make sure the user_library row exists for this user & book
-    const { data: existing, error: selErr } = await supabase
+    const { data: existing } = await supabase
       .from("user_library")
-      .select("id")
+      .select("id, progress")
       .eq("user_id", userId)
       .eq("book_id", bookId)
       .maybeSingle();
 
-    if (selErr) {
-      console.error("Supabase select error (updateReadingProgress):", selErr);
-      return res.status(500).json({ error: "Database error" });
+    if (!existing) {
+      return res.status(404).json({ error: "Library entry not found" });
     }
 
-    if (!existing) {
-      return res.status(404).json({ error: "Library entry not found for this user/book" });
+    if (existing.progress >= progress) {
+      console.log("Ignored update (regression) ->", existing.progress, progress);
+      return res.json({
+        message: "Ignored regression",
+        progress: existing.progress,
+      });
     }
+
+    console.log("UPDATE PROGRESS REQUEST", { userId, bookId, progress });
+
+    const updates = {
+      progress,
+      completed_at: progress === 100 ? now : null,
+    };
 
     const { error } = await supabase
       .from("user_library")
@@ -429,24 +432,23 @@ export const updateReadingProgress = async (req, res) => {
       .eq("user_id", userId)
       .eq("book_id", bookId);
 
-    if (error) {
-      console.error("🔥 SUPABASE UPDATE ERROR (updateReadingProgress):", error);
-      return res.status(400).json({ error: error.message, details: error });
-    }
+    if (error) return res.status(400).json({ error: error.message });
 
-    // If you have a global dashboard refresh, call it
-    globalThis.dispatchDashboardUpdate?.();
+    console.log("DB UPDATED SUCCESSFULLY:", userId, bookId, progress);
 
-    res.json({
+    return res.json({
       message: "Progress updated",
       progress,
       completed: progress === 100,
     });
+
   } catch (err) {
-    console.error("updateReadingProgress error:", err);
-    res.status(500).json({ error: "Failed to update reading progress" });
+    console.error("Progress update failed:", err);
+    return res.status(500).json({ error: "Failed to update progress" });
   }
 };
+
+
 
 
 
@@ -458,6 +460,33 @@ export const startReading = async (req, res) => {
   const userId = req.user.id;
   const { book_id } = req.body;
 
+  // Get existing record
+  const { data: existing, error: selErr } = await supabase
+    .from("user_library")
+    .select("progress")
+    .eq("user_id", userId)
+    .eq("book_id", book_id)
+    .maybeSingle();
+
+  if (selErr) return res.status(400).json({ error: selErr.message });
+
+  // Insert if not exists
+  if (!existing) {
+    const { error } = await supabase
+      .from("user_library")
+      .insert({ user_id: userId, book_id, progress: 1, last_page: 1 });
+
+    if (error) return res.status(400).json({ error: error.message });
+
+    return res.json({ message: "Started reading", progress: 1 });
+  }
+
+  // If already has progress > 1 don't reset to 1
+  if (existing.progress > 1) {
+    return res.json({ message: "Already started", progress: existing.progress });
+  }
+
+  // Update only if progress was 0
   const { error } = await supabase
     .from("user_library")
     .update({ progress: 1 })
@@ -466,8 +495,9 @@ export const startReading = async (req, res) => {
 
   if (error) return res.status(400).json({ error: error.message });
 
-  res.json({ message: "Reading started" });
+  res.json({ message: "Started reading", progress: 1 });
 };
+
 
 /* ============================================
    🎯 MARK COMPLETED
