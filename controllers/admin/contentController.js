@@ -272,9 +272,10 @@ export const listContent = async (req, res) => {
 
     if (table === "mock_tests") {
       const { data, error } = await supabase
-        .from("mock_tests")
-        .select("*, attempts:mock_attempts(count)")
-        .order("created_at", { ascending: false });
+  .from("mock_tests")
+  .select("*")
+  .order("created_at", { ascending: false });
+
 
       if (error)
         return res.status(400).json({ error: error.message });

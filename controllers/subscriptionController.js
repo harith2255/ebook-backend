@@ -12,12 +12,15 @@ export const getPlans = async (req, res) => {
       .order("price", { ascending: true });
 
     if (error) throw error;
+
     res.json(data);
+
   } catch (err) {
     console.error("getPlans error:", err.message || err);
     res.status(500).json({ error: "Failed to load plans" });
   }
 };
+
 
 /**
  * GET /api/subscriptions/active
@@ -28,24 +31,23 @@ export const getActiveSubscription = async (req, res) => {
     const userId = req.user.id;
 
     const { data, error } = await supabase
-  .from("user_subscriptions")
-  .select("*, plan:subscription_plans(*)")
-  .eq("user_id", userId)
-  .eq("status", "active")
-  .order("started_at", { ascending: false })
-  .limit(1)
-  .maybeSingle();
+      .from("user_subscriptions")
+      .select("*, plan:subscription_plans(*)")
+      .eq("user_id", userId)
+      .eq("status", "active")
+      .order("started_at", { ascending: false }) // newest first
+      .limit(1)
+      .maybeSingle();
 
-if (error) {
-  console.error("SUPABASE ERROR:", error);
-  return res.status(500).json({
-    error: error.message,
-    details: error.details,
-    hint: error.hint,
-    code: error.code,
-  });
-}
-
+    if (error) {
+      console.error("SUPABASE ERROR:", error);
+      return res.status(500).json({
+        error: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code,
+      });
+    }
 
     if (!data) return res.json(null);
 
@@ -55,20 +57,22 @@ if (error) {
       name: data.plan.name,
       price: data.plan.price,
       period: data.plan.period,
-      renewsOn: data.expires_at, // important
+      renewsOn: data.expires_at,
     };
 
     res.json(active);
+
   } catch (err) {
     console.error("getActiveSubscription error:", err.message || err);
     res.status(500).json({ error: "Failed to fetch subscription" });
   }
 };
 
+
 /**
  * POST /api/subscriptions/upgrade
  * Body: { planId }
- * Protected - simulate payment + create/replace subscription
+ * Protected - create/replace subscription + record revenue
  */
 export const upgradeSubscription = async (req, res) => {
   try {
@@ -85,14 +89,17 @@ export const upgradeSubscription = async (req, res) => {
       .single();
 
     if (planErr) throw planErr;
+    if (!plan) return res.status(404).json({ error: "Plan not found" });
 
-    // create transaction
+    const price = Number(plan.price) || 0;
+
+    // 1️⃣ create payment transaction
     const { error: txErr } = await supabase
       .from("payments_transactions")
       .insert({
         user_id: userId,
         plan_id: planId,
-        amount: plan.price,
+        amount: price,
         currency: "INR",
         method: "manual-test",
         status: "completed",
@@ -101,21 +108,43 @@ export const upgradeSubscription = async (req, res) => {
 
     if (txErr) throw txErr;
 
-    // compute expiry date
-    const now = new Date();
-    const expiresAt =
-      plan.period === "monthly"
-        ? new Date(now.setMonth(now.getMonth() + 1)).toISOString()
-        : new Date(now.setFullYear(now.getFullYear() + 1)).toISOString();
+    // ⭐️ 2️⃣ record revenue
+    const { error: revErr } = await supabase
+      .from("revenue")
+      .insert({
+        user_id: userId,
+        amount: price,
+        item_type: "subscription",
+        item_id: plan.id,
+      });
 
-    // deactivate old subscriptions
+    if (revErr) throw revErr;
+
+
+    // 3️⃣ compute expiry date (⚠️ avoid mutating date)
+    const now = new Date();
+    let expiresAt;
+
+    if (plan.period === "monthly") {
+      const future = new Date(now);
+      future.setMonth(future.getMonth() + 1);
+      expiresAt = future.toISOString();
+    } else {
+      const future = new Date(now);
+      future.setFullYear(future.getFullYear() + 1);
+      expiresAt = future.toISOString();
+    }
+
+
+    // 4️⃣ deactivate old subscriptions
     await supabase
       .from("user_subscriptions")
       .update({ status: "expired" })
       .eq("user_id", userId)
       .eq("status", "active");
 
-    // create new subscription
+
+    // 5️⃣ create new active subscription
     const { data: newSub, error: subErr } = await supabase
       .from("user_subscriptions")
       .insert({
@@ -130,7 +159,8 @@ export const upgradeSubscription = async (req, res) => {
 
     if (subErr) throw subErr;
 
-    // return a **flattened clean object** to frontend
+
+    // 6️⃣ return clean object to frontend
     res.json({
       success: true,
       subscription: {
@@ -141,12 +171,18 @@ export const upgradeSubscription = async (req, res) => {
         renewsOn: expiresAt,
       },
     });
+
   } catch (err) {
     console.error("upgradeSubscription error:", err.message || err);
     res.status(500).json({ error: "Upgrade failed" });
   }
 };
 
+
+/**
+ * GET /api/subscriptions/:id
+ * Public: get single plan
+ */
 export const getSinglePlan = async (req, res) => {
   try {
     const { id } = req.params;
@@ -171,12 +207,18 @@ export const getSinglePlan = async (req, res) => {
       description: data.description || "",
       features: data.features || [],
     });
+
   } catch (err) {
     console.error("getSinglePlan error:", err.message || err);
     res.status(500).json({ error: "Failed to load subscription plan" });
   }
 };
-// controllers/subscriptionController.js (append)
+
+
+/**
+ * POST /api/subscriptions/cancel
+ * Protected: cancel subscription
+ */
 export const cancelSubscription = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -189,10 +231,12 @@ export const cancelSubscription = async (req, res) => {
       .maybeSingle();
 
     if (activeErr) throw activeErr;
-    if (!activeSub)
-      return res.status(400).json({ error: "No active subscription found" });
 
-    // mark canceled (but keep expiry so user retains access until then)
+    if (!activeSub) {
+      return res.status(400).json({ error: "No active subscription found" });
+    }
+
+    // mark canceled (user keeps access until expiry)
     const { error: updateErr } = await supabase
       .from("user_subscriptions")
       .update({ status: "canceled" })
@@ -200,7 +244,7 @@ export const cancelSubscription = async (req, res) => {
 
     if (updateErr) throw updateErr;
 
-    // optional: log cancellation transaction
+    // optional: log transaction
     await supabase.from("payments_transactions").insert({
       user_id: userId,
       plan_id: activeSub.plan_id,
@@ -211,11 +255,12 @@ export const cancelSubscription = async (req, res) => {
       description: "Subscription canceled",
     });
 
-    return res.json({
+    res.json({
       success: true,
       message: "Subscription canceled successfully",
       expiresAt: activeSub.expires_at,
     });
+
   } catch (err) {
     console.error("cancelSubscription error:", err.message || err);
     res.status(500).json({ error: "Failed to cancel subscription" });

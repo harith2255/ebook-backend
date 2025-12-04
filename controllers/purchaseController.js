@@ -31,7 +31,6 @@ export const unifiedPurchase = async (req, res) => {
         if (item.type === "book") {
           const result = await processBookPurchase(userId, item.id);
 
-          // Remove from cart
           await supabase
             .from("user_cart")
             .delete()
@@ -62,6 +61,7 @@ export const unifiedPurchase = async (req, res) => {
             alreadyPurchased: !!result?.alreadyPurchased,
           });
         }
+
       } catch (err) {
         console.error("Item purchase error:", err);
         errors.push({ id: item.id, type: item.type, error: err.message });
@@ -73,14 +73,16 @@ export const unifiedPurchase = async (req, res) => {
     }
 
     return res.json({ success: true, results });
+
   } catch (err) {
     console.error("unifiedPurchase error:", err);
     return res.status(500).json({ error: "Server error processing purchase" });
   }
 };
 
+
 /* ============================================================
-   2️⃣ PROCESS BOOK PURCHASE — INSERT INTO book_sales
+   2️⃣ PROCESS BOOK PURCHASE — INSERT INTO book_sales + REVENUE
 =============================================================== */
 async function processBookPurchase(userId, bookId) {
 
@@ -94,16 +96,30 @@ async function processBookPurchase(userId, bookId) {
 
   if (exists) return { alreadyPurchased: true };
 
+
+  // ⭐ get price for revenue
+  const { data: book, error: priceErr } = await supabase
+    .from("books")
+    .select("price")
+    .eq("id", bookId)
+    .single();
+
+  if (priceErr) throw priceErr;
+  const price = Number(book?.price) || 0;
+
+
   // 1️⃣ insert into book_sales
   const { error: saleError } = await supabase
     .from("book_sales")
     .insert({
       user_id: userId,
       book_id: bookId,
+      amount: price,              // optional if exists
       purchased_at: new Date().toISOString(),
     });
 
   if (saleError) throw saleError;
+
 
   // 2️⃣ insert into user_library (if not exists)
   const { data: libExists } = await supabase
@@ -125,13 +141,27 @@ async function processBookPurchase(userId, bookId) {
       });
   }
 
-  // 3️⃣ notify UI
+
+  // ⭐ 3️⃣ insert revenue record
+  const { error: revErr } = await supabase
+    .from("revenue")
+    .insert({
+      user_id: userId,
+      amount: price,
+      item_type: "book",
+      item_id: bookId,
+    });
+
+  if (revErr) throw revErr;
+
+
+  // 4️⃣ notify UI
   return { success: true };
 }
 
 
 /* ============================================================
-   3️⃣ PROCESS NOTE PURCHASE — INSERT INTO notes_purchase
+   3️⃣ PROCESS NOTE PURCHASE — INSERT INTO notes_purchase + REVENUE
 =============================================================== */
 async function processNotePurchase(userId, noteId) {
   if (!noteId) return { skipped: true };
@@ -147,21 +177,48 @@ async function processNotePurchase(userId, noteId) {
 
   if (exists) return { alreadyPurchased: true };
 
+
+  // ⭐ get price for revenue
+  const { data: note, error: priceErr } = await supabase
+    .from("notes")
+    .select("price")
+    .eq("id", numericId)
+    .single();
+
+  if (priceErr) throw priceErr;
+  const price = Number(note?.price) || 0;
+
+
   const { error } = await supabase.from("notes_purchase").insert({
-    id: crypto.randomUUID(), // UUID required
+    id: crypto.randomUUID(),
     user_id: userId,
     note_id: numericId,
+    amount: price,               // optional if exists
     purchased_at: new Date().toISOString(),
   });
 
   if (error) throw error;
 
+
+  // ⭐ insert revenue record
+  const { error: revErr } = await supabase
+    .from("revenue")
+    .insert({
+      user_id: userId,
+      amount: price,
+      item_type: "note",
+      item_id: numericId,
+    });
+
+  if (revErr) throw revErr;
+
+
   return { success: true };
 }
 
+
 /* ============================================================
-   4️⃣ CHECK PURCHASE STATUS — USED BY BOOK READER
-   Returns: { purchased: true/false }
+   4️⃣ CHECK PURCHASE STATUS — NO CHANGE
 =============================================================== */
 export const checkPurchase = async (req, res) => {
   try {
@@ -172,7 +229,6 @@ export const checkPurchase = async (req, res) => {
       return res.status(400).json({ error: "Missing bookId or noteId" });
     }
 
-    // BOOK
     if (bookId) {
       const { data, error } = await supabase
         .from("book_sales")
@@ -181,15 +237,11 @@ export const checkPurchase = async (req, res) => {
         .eq("book_id", bookId)
         .maybeSingle();
 
-      if (error) {
-        console.error("checkPurchase book error:", error);
-        return res.status(500).json({ error: "Database error" });
-      }
+      if (error) return res.status(500).json({ error: "Database error" });
 
       return res.json({ purchased: !!data });
     }
 
-    // NOTE
     if (noteId) {
       const { data, error } = await supabase
         .from("notes_purchase")
@@ -198,21 +250,19 @@ export const checkPurchase = async (req, res) => {
         .eq("note_id", Number(noteId))
         .maybeSingle();
 
-      if (error) {
-        console.error("checkPurchase note error:", error);
-        return res.status(500).json({ error: "Database error" });
-      }
+      if (error) return res.status(500).json({ error: "Database error" });
 
       return res.json({ purchased: !!data });
     }
+
   } catch (err) {
-    console.error("checkPurchase error:", err);
     return res.status(500).json({ error: "Error checking purchase" });
   }
 };
 
+
 /* ============================================================
-   5️⃣ GET PURCHASED BOOKS WITH DETAILS
+   5️⃣ GET PURCHASED BOOKS — NO CHANGE
 =============================================================== */
 export const getPurchasedBooks = async (req, res) => {
   try {
@@ -238,14 +288,15 @@ export const getPurchasedBooks = async (req, res) => {
     }));
 
     return res.json(books);
+
   } catch (err) {
-    console.error("getPurchasedBooks error:", err);
     return res.status(500).json({ error: "Failed to get purchased books" });
   }
 };
 
+
 /* ============================================================
-   6️⃣ GET PURCHASED BOOK IDS
+   6️⃣ GET PURCHASED BOOK IDS — NO CHANGE
 =============================================================== */
 export const getPurchasedBookIds = async (req, res) => {
   try {
@@ -258,17 +309,16 @@ export const getPurchasedBookIds = async (req, res) => {
 
     if (error) throw error;
 
-    const ids = data.map((row) => row.book_id);
+    return res.json(data.map((row) => row.book_id));
 
-    return res.json(ids);
   } catch (err) {
-    console.error("getPurchasedBookIds error:", err);
     return res.status(500).json([]);
   }
 };
 
+
 /* ============================================================
-   7️⃣ GET PURCHASED NOTE IDS
+   7️⃣ GET PURCHASED NOTE IDS — NO CHANGE
 =============================================================== */
 export const getPurchasedNoteIds = async (req, res) => {
   try {
@@ -282,8 +332,8 @@ export const getPurchasedNoteIds = async (req, res) => {
     if (error) throw error;
 
     return res.json(data.map((row) => Number(row.note_id)));
+
   } catch (err) {
-    console.error("getPurchasedNoteIds error:", err);
     return res.status(500).json([]);
   }
 };
