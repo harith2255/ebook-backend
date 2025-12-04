@@ -12,10 +12,10 @@ export const startTest = async (req, res) => {
       return res.status(400).json({ error: "Missing test_id" });
     }
 
-    /* 1️⃣ Check test exists */
+    // 1. Fetch test metadata
     const { data: test, error: testErr } = await supabase
       .from("mock_tests")
-      .select("id, start_time")
+      .select("id, start_time, duration_minutes")
       .eq("id", test_id)
       .single();
 
@@ -23,61 +23,63 @@ export const startTest = async (req, res) => {
       return res.status(404).json({ error: "Test not found" });
     }
 
-    /* 2️⃣ Prevent starting before start_time */
+    // 2. Check schedule
     if (test.start_time && new Date(test.start_time) > new Date()) {
       return res.status(400).json({ error: "This test has not started yet" });
     }
 
-    /* 3️⃣ Check if user already has ongoing attempt */
-    const { data: existing } = await supabase
+    // 3. Check previous attempt
+    const { data: priorAttempt } = await supabase
       .from("mock_attempts")
-      .select("id")
+      .select("id, status")
       .eq("user_id", user_id)
       .eq("test_id", test_id)
-      .eq("status", "in_progress")
       .maybeSingle();
 
-    if (existing) {
+    // 4. If already in-progress -> resume
+    if (priorAttempt && priorAttempt.status === "in_progress") {
       return res.json({
-        attempt: existing,
+        attempt: priorAttempt,
         already_started: true,
       });
     }
 
-    /* 4️⃣ Create new attempt */
+    // 5. Create new attempt (ALWAYS INSERT)
     const { data: attempt, error: insertErr } = await supabase
       .from("mock_attempts")
       .insert({
         user_id,
         test_id,
         status: "in_progress",
-        started_at: new Date(),
         completed_questions: 0,
         score: 0,
         time_spent: 0,
+        started_at: new Date().toISOString(),
       })
       .select()
       .single();
 
     if (insertErr) {
+      console.error(insertErr);
       return res.status(400).json({ error: insertErr.message });
     }
 
-    /* 5️⃣ Increment participant count (async, non-blocking) */
-   try {
-  const { error } = await supabase.rpc("increment_participants", { testid: test_id });
-  if (error) console.error("RPC error:", error);
-} catch (e) {
-  console.error("RPC crash:", e);
-}
-
+    // 6. Increment participants only if first attempt
+    if (!priorAttempt) {
+      await supabase.rpc("increment_participants", {
+        test_id_input: Number(test_id),
+      }).catch(console.warn);
+    }
 
     return res.json({ attempt });
+
   } catch (err) {
     console.error("❌ startTest error", err);
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
+
+
 
 /* ==========================================================
    GET QUESTIONS
@@ -112,7 +114,28 @@ export const saveAnswer = async (req, res) => {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    /* 1️⃣ Save / update answer */
+    // validate question belongs to attempt’s test
+    const { data: attempt } = await supabase
+      .from("mock_attempts")
+      .select("test_id")
+      .eq("id", attempt_id)
+      .maybeSingle();
+
+    if (!attempt) {
+      return res.status(404).json({ error: "Attempt not found" });
+    }
+
+    const { data: question } = await supabase
+      .from("mock_test_questions")
+      .select("test_id")
+      .eq("id", question_id)
+      .maybeSingle();
+
+    if (!question || question.test_id !== attempt.test_id) {
+      return res.status(400).json({ error: "Invalid question for this test" });
+    }
+
+    // Save answer
     const { error: upsertErr } = await supabase
       .from("mock_answers")
       .upsert({
@@ -125,7 +148,7 @@ export const saveAnswer = async (req, res) => {
       return res.status(400).json({ error: upsertErr.message });
     }
 
-    /* 2️⃣ Count completed answers */
+    // Count answered
     const { count, error: countErr } = await supabase
       .from("mock_answers")
       .select("*", { count: "exact", head: true })
@@ -135,18 +158,20 @@ export const saveAnswer = async (req, res) => {
       return res.status(400).json({ error: countErr.message });
     }
 
-    /* 3️⃣ Update progress */
+    // update progress
     await supabase
       .from("mock_attempts")
       .update({ completed_questions: count })
       .eq("id", attempt_id);
 
     return res.json({ success: true });
+
   } catch (err) {
-    console.error("❌ saveAnswer error", err);
+    console.error("saveAnswer error:", err);
     return res.status(500).json({ error: err.message });
   }
 };
+
 
 /* ==========================================================
    FINISH TEST
@@ -160,14 +185,14 @@ export const finishTest = async (req, res) => {
       return res.status(400).json({ error: "Missing attempt_id" });
     }
 
-    /* 1️⃣ Get attempt details */
-    const { data: attempt, error: attErr } = await supabase
+    // load attempt
+    const { data: attempt } = await supabase
       .from("mock_attempts")
       .select("test_id, started_at, status")
       .eq("id", attempt_id)
-      .single();
+      .maybeSingle();
 
-    if (attErr || !attempt) {
+    if (!attempt) {
       return res.status(404).json({ error: "Attempt not found" });
     }
 
@@ -175,21 +200,21 @@ export const finishTest = async (req, res) => {
       return res.json({ already_finished: true });
     }
 
-    /* 2️⃣ Calculate score */
+    // Score
     const { score, percentScore } = await calculateScore(
       attempt_id,
       attempt.test_id
     );
 
-    /* 3️⃣ Calculate time spent */
+    // Time spent
     const started = new Date(attempt.started_at);
     const now = new Date();
     const timeSpent = Math.max(
-      Math.round((now - started) / 1000 / 60),
+      Math.round((now - started) / 60000),
       1
-    ); // min 1 min
+    );
 
-    /* 4️⃣ Update attempt */
+    // Update attempt
     await supabase
       .from("mock_attempts")
       .update({
@@ -200,20 +225,19 @@ export const finishTest = async (req, res) => {
       })
       .eq("id", attempt_id);
 
-    /* 5️⃣ Update analytics async */
-    Promise.all([
-      updateLeaderboard(user_id),
-      updateUserStats(user_id, percentScore, timeSpent),
-      updateRanks(),
-    ]).catch(() => {});
+    // async analytics
+    updateUserStats(user_id, percentScore, timeSpent).catch(() => {});
+    updateLeaderboard(user_id).catch(() => {});
+    updateRanks().catch(() => {});
 
     return res.json({
       success: true,
       score: percentScore,
       time_spent: timeSpent,
     });
+
   } catch (err) {
-    console.error("❌ finishTest error", err);
+    console.error("finishTest error:", err);
     return res.status(500).json({ error: err.message });
   }
 };
@@ -277,15 +301,16 @@ async function updateLeaderboard(user_id) {
     .eq("user_id", user_id)
     .eq("status", "completed");
 
-  if (!data || data.length === 0) return;
+  if (!data?.length) return;
 
-  const scores = data.map((x) => x.score);
-  const avg = Math.round(scores.reduce((a, b) => a + b) / scores.length);
+  const avg = Math.round(
+    data.reduce((a, b) => a + b.score, 0) / data.length
+  );
 
   await supabase.from("mock_leaderboard").upsert({
     user_id,
     average_score: avg,
-    tests_taken: scores.length,
+    tests_taken: data.length,
   });
 }
 
@@ -330,26 +355,36 @@ async function updateUserStats(user_id, newScore, timeSpent) {
    UPDATE RANKS (GLOBAL)
 ========================================================== */
 async function updateRanks() {
-  const { data: board } = await supabase
-    .from("mock_leaderboard")
-    .select("user_id, average_score")
-    .order("average_score", { ascending: false });
+ const { data: board } = await supabase
+  .from("mock_leaderboard")
+  .select(`
+    user_id,
+    average_score,
+    profiles (status)
+  `)
+  .order("average_score", { ascending: false });
 
   if (!board) return;
 
-  for (let i = 0; i < board.length; i++) {
-    const rank = i + 1;
-    const user_id = board[i].user_id;
+  const updates = board.map((row, i) => ({
+    user_id: row.user_id,
+    best_rank: i + 1,
+  }));
 
+  // bulk update
+  for (const u of updates) {
     await supabase
       .from("mock_leaderboard")
-      .update({ best_rank: rank })
-      .eq("user_id", user_id);
+      .update({ best_rank: u.best_rank })
+      .eq("user_id", u.user_id);
+  }
 
+  // update attempts ranks
+  for (const u of updates) {
     await supabase
       .from("mock_attempts")
-      .update({ rank })
-      .eq("user_id", user_id)
+      .update({ rank: u.best_rank })
+      .eq("user_id", u.user_id)
       .eq("status", "completed");
   }
 }

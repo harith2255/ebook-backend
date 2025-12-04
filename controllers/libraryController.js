@@ -446,6 +446,7 @@ export const updateReadingProgress = async (req, res) => {
       progress,
       last_page,
       completed: progress === 100,
+      bookId,
     });
 
   } catch (err) {
@@ -464,15 +465,15 @@ export const getCollectionBookIds = async (req, res) => {
 
     if (error) {
       console.error("getCollectionBookIds error:", error);
-      return res.status(400).json({ error: error.message });
+      return res.json([]);
     }
 
-    const ids = data.map((x) => x.book_id);
+    const ids = data.map((row) => row.book_id);
     return res.json(ids);
 
   } catch (err) {
     console.error("getCollectionBookIds failed:", err);
-    return res.status(500).json({ error: "Server error" });
+    return res.json([]);
   }
 };
 

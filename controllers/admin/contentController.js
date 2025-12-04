@@ -5,6 +5,8 @@ import getPdfPageCount from "../../utils/pdfReader.js";
    UPLOAD CONTENT
    POST /api/admin/content/upload
 ============================================================================ */
+
+
 export const uploadContent = async (req, res) => {
   try {
     const { type } = req.body;
@@ -27,23 +29,31 @@ export const uploadContent = async (req, res) => {
       console.error("❌ Failed to parse MCQs:", e);
     }
 
+    // ---------------------------
+    // BASIC VALIDATION
+    // ---------------------------
     if (!type || !title) {
       return res.status(400).json({ error: "type and title are required" });
     }
 
     if (type !== "Mock Test" && !author) {
       return res.status(400).json({
-        error: "author is required for E-Book and Notes"
+        error: "author is required for E-Book and Notes",
       });
     }
 
     const table =
-      type === "E-Book" ? "ebooks" :
-      type === "Notes" ? "notes" :
-      type === "Mock Test" ? "mock_tests" : null;
+      type === "E-Book"
+        ? "ebooks"
+        : type === "Notes"
+        ? "notes"
+        : type === "Mock Test"
+        ? "mock_tests"
+        : null;
 
-    if (!table)
+    if (!table) {
       return res.status(400).json({ error: "Invalid content type" });
+    }
 
     let publicUrl = null;
     let coverUrl = null;
@@ -60,8 +70,10 @@ export const uploadContent = async (req, res) => {
           upsert: false,
         });
 
-      if (uploadErr)
+      if (uploadErr) {
+        console.error("File upload error:", uploadErr);
         return res.status(400).json({ error: uploadErr.message });
+      }
 
       const { data: publicData } = supabase.storage
         .from(table)
@@ -89,8 +101,10 @@ export const uploadContent = async (req, res) => {
           upsert: false,
         });
 
-      if (coverErr)
+      if (coverErr) {
+        console.error("Cover upload error:", coverErr);
         return res.status(400).json({ error: coverErr.message });
+      }
 
       const { data: coverData } = supabase.storage
         .from("covers")
@@ -99,7 +113,7 @@ export const uploadContent = async (req, res) => {
       coverUrl = coverData?.publicUrl || null;
     }
 
-    /* ==================== INSERT MAIN ROW ==================== */
+    /* ==================== BUILD INSERT OBJ ==================== */
     let insertObj = {};
 
     if (table === "ebooks") {
@@ -138,57 +152,103 @@ export const uploadContent = async (req, res) => {
     }
 
     if (table === "mock_tests") {
+      // EXTRA VALIDATION FOR MOCK TESTS
+      const rawTotalQs = req.body.total_questions;
+      const rawDuration = req.body.duration_minutes;
+
+      if (!rawTotalQs) {
+        return res
+          .status(400)
+          .json({ error: "total_questions is required for Mock Test" });
+      }
+      if (!rawDuration) {
+        return res
+          .status(400)
+          .json({ error: "duration_minutes is required for Mock Test" });
+      }
+
+      const totalQs = Number(rawTotalQs);
+      const duration = Number(rawDuration);
+
+      if (!Number.isFinite(totalQs) || totalQs <= 0) {
+        return res
+          .status(400)
+          .json({ error: "Invalid total_questions value" });
+      }
+
+      if (!Number.isFinite(duration) || duration <= 0) {
+        return res
+          .status(400)
+          .json({ error: "Invalid duration_minutes value" });
+      }
+
+      const scheduled = req.body.scheduled_date || null;
+
       insertObj = {
         title,
-        category,
+        subject: req.body.subject || null,
+        difficulty: req.body.difficulty || null,
+        total_questions: totalQs,
+        duration_minutes: duration,
+        start_time: scheduled, // DB uses start_time (NOT scheduled_date)
         description,
-        price,
+        participants: 0,
         created_at: new Date().toISOString(),
       };
     }
 
+    /* ==================== INSERT MAIN ROW ==================== */
     const { data: insertData, error: insertError } = await supabase
       .from(table)
       .insert(insertObj)
       .select()
       .single();
 
-    if (insertError)
+    if (insertError) {
+      console.error("Insert error:", insertError);
       return res.status(400).json({ error: insertError.message });
-
-
-    /* ==================== INSERT MCQs ==================== */
-    if (table === "mock_tests" && Array.isArray(mcqs) && insertData?.id) {
-      const formatted = mcqs
-        .filter(q => q.question?.trim())
-        .map(q => ({
-          test_id: insertData.id,
-          question: q.question,
-          option_a: q.options?.[0] || null,
-          option_b: q.options?.[1] || null,
-          option_c: q.options?.[2] || null,
-          option_d: q.options?.[3] || null,
-          correct_option: q.answer || null,
-        }));
-
-      if (formatted.length) {
-        const { error: qErr } = await supabase
-          .from("mock_test_questions")
-          .insert(formatted);
-
-        if (qErr)
-          console.error("❌ MCQ insert error:", qErr);
-      }
     }
 
+    /* ==================== INSERT MCQs (for Mock Test) ==================== */
+    if (type === "Mock Test" && Array.isArray(mcqs) && mcqs.length > 0) {
+      const testId = insertData.id;
+
+      const questionRows = mcqs.map((mcq) => ({
+        test_id: testId,
+        question: mcq.question || "",
+        option_a: mcq.options?.[0] || "",
+        option_b: mcq.options?.[1] || "",
+        option_c: mcq.options?.[2] || "",
+        option_d: mcq.options?.[3] || "",
+        correct_option: mcq.answer || "",
+      }));
+
+      const { error: qErr } = await supabase
+        .from("mock_test_questions")
+        .insert(questionRows);
+
+      if (qErr) {
+        console.error("MCQ insert error:", qErr);
+        // Test is created but MCQs failed → you can decide if this should be 400 or 201 with warning
+        return res.status(400).json({
+          error: "Mock test created, but MCQ insert failed",
+          details: qErr.message,
+        });
+      }
+
+      console.log(`Inserted ${questionRows.length} MCQs for test ${testId}`);
+    }
+
+    /* ==================== SUCCESS RESPONSE ==================== */
     return res.status(201).json({
       message: "Content uploaded",
       data: insertData,
     });
-
   } catch (err) {
     console.error("uploadContent error:", err);
-    return res.status(500).json({ error: "Server error uploading content" });
+    return res
+      .status(500)
+      .json({ error: "Server error uploading content" });
   }
 };
 
