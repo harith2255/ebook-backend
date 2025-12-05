@@ -96,32 +96,30 @@ async function processBookPurchase(userId, bookId) {
 
   if (exists) return { alreadyPurchased: true };
 
-
-  // ⭐ get price for revenue
-  const { data: book, error: priceErr } = await supabase
-    .from("books")
+  // get price from ebooks
+  const { data: bookRow, error: priceErr } = await supabase
+    .from("ebooks")
     .select("price")
     .eq("id", bookId)
     .single();
 
   if (priceErr) throw priceErr;
-  const price = Number(book?.price) || 0;
 
+  const price = Number(bookRow?.price) || 0;
 
-  // 1️⃣ insert into book_sales
+  // insert into book_sales
   const { error: saleError } = await supabase
     .from("book_sales")
     .insert({
+      id: crypto.randomUUID(),
       user_id: userId,
       book_id: bookId,
-      amount: price,              // optional if exists
       purchased_at: new Date().toISOString(),
     });
 
   if (saleError) throw saleError;
 
-
-  // 2️⃣ insert into user_library (if not exists)
+  // Ensure user has library entry
   const { data: libExists } = await supabase
     .from("user_library")
     .select("id")
@@ -141,33 +139,35 @@ async function processBookPurchase(userId, bookId) {
       });
   }
 
-
-  // ⭐ 3️⃣ insert revenue record
+  // insert revenue
   const { error: revErr } = await supabase
     .from("revenue")
     .insert({
       user_id: userId,
       amount: price,
       item_type: "book",
-      item_id: bookId,
+   item_id: null,
     });
 
-  if (revErr) throw revErr;
+  if (revErr) {
+    console.error("Revenue insert failed:", revErr.message);
+  }
 
-
-  // 4️⃣ notify UI
   return { success: true };
-}
+};
+
 
 
 /* ============================================================
    3️⃣ PROCESS NOTE PURCHASE — INSERT INTO notes_purchase + REVENUE
 =============================================================== */
 async function processNotePurchase(userId, noteId) {
+
   if (!noteId) return { skipped: true };
 
   const numericId = Number(noteId);
 
+  // skip if purchased earlier
   const { data: exists } = await supabase
     .from("notes_purchase")
     .select("id")
@@ -177,44 +177,46 @@ async function processNotePurchase(userId, noteId) {
 
   if (exists) return { alreadyPurchased: true };
 
-
-  // ⭐ get price for revenue
-  const { data: note, error: priceErr } = await supabase
+  // get price
+  const { data: noteRow, error: priceErr } = await supabase
     .from("notes")
     .select("price")
     .eq("id", numericId)
     .single();
 
   if (priceErr) throw priceErr;
-  const price = Number(note?.price) || 0;
 
+  const price = Number(noteRow?.price) || 0;
 
-  const { error } = await supabase.from("notes_purchase").insert({
-    id: crypto.randomUUID(),
-    user_id: userId,
-    note_id: numericId,
-    amount: price,               // optional if exists
-    purchased_at: new Date().toISOString(),
-  });
+  // insert into notes_purchase
+  const { error } = await supabase
+    .from("notes_purchase")
+    .insert({
+      id: crypto.randomUUID(),
+      user_id: userId,
+      note_id: numericId,
+      purchased_at: new Date().toISOString(),
+    });
 
   if (error) throw error;
 
-
-  // ⭐ insert revenue record
+  // insert revenue
   const { error: revErr } = await supabase
     .from("revenue")
     .insert({
       user_id: userId,
       amount: price,
       item_type: "note",
-      item_id: numericId,
+      item_id: null,
     });
 
-  if (revErr) throw revErr;
-
+  if (revErr) {
+    console.error("Revenue insert failed:", revErr.message);
+  }
 
   return { success: true };
-}
+};
+
 
 
 /* ============================================================

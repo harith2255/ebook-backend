@@ -25,11 +25,13 @@ export const listCustomers = async (req, res) => {
     if (plan) query = query.eq("plan", plan);
 
     if (search) {
-      query = query.or(`name.ilike.%${search}%,email.ilike.%${search}%`);
+    query = query.or(`full_name.ilike.%${search}%,email.ilike.%${search}%`);
+
     }
 
     const { data, count, error } = await query
-      .order("joined", { ascending: false })
+     .order("created_at", { ascending: false })
+
       .range(start, end);
 
     if (error) return res.status(400).json({ error: error.message });

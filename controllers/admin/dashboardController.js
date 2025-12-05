@@ -15,34 +15,47 @@ export const getAdminDashboard = async (req, res) => {
     /* ---------------------------------------------
        USERS FROM v_customers  (FIXED)
     --------------------------------------------- */
-    const { data: customers, error: custErr } = await supabaseAdmin
-      .from("v_customers")
-      .select("id, joined");
-
-    if (custErr) {
-      console.error("v_customers fetch error:", custErr);
-      return res.status(500).json({ error: "Cannot load user count" });
-    }
-
-    const totalUsers = customers.length;
-
-    const nowISO = new Date().toISOString();
-
     /* ---------------------------------------------
-       ACTIVE SUBSCRIPTIONS
-    --------------------------------------------- */
-    const { count: activeSubs } = await supabaseAdmin
-      .from("user_subscriptions")
-      .select("*", { count: "exact", head: true })
-      .eq("status", "active")
-      .gte("expires_at", nowISO);
+   USERS FROM v_customers
+--------------------------------------------- */
+const { data: customers, error: custErr } = await supabaseAdmin
+  .from("v_customers")
+  .select("id, created_at");
 
-    /* ---------------------------------------------
-       BOOKS SOLD
-    --------------------------------------------- */
-    const { count: booksSold } = await supabaseAdmin
-      .from("book_sales")
-      .select("*", { count: "exact", head: true });
+if (custErr) {
+  console.error("v_customers fetch error:", custErr);
+  return res.status(500).json({ error: "Cannot load user count" });
+}
+
+const totalUsers = customers.length;
+
+const nowISO = new Date().toISOString();
+
+/* ---------------------------------------------
+   ACTIVE SUBSCRIPTIONS
+--------------------------------------------- */
+const { count: activeSubs, error: subErr } = await supabaseAdmin
+  .from("user_subscriptions")
+  .select("*", { count: "exact", head: true })
+  .eq("status", "active")
+  .gte("expires_at", nowISO);
+
+if (subErr) {
+  console.error("user_subscriptions error:", subErr);
+}
+
+/* ---------------------------------------------
+   BOOKS SOLD (revenue item_type=ebook)
+--------------------------------------------- */
+const { count: booksSold, error: bookErr } = await supabaseAdmin
+  .from("revenue")
+  .select("id", { count: "exact", head: true })
+  .eq("item_type", "book");
+
+if (bookErr) {
+  console.error("revenue item_type ebook error:", bookErr);
+}
+
 
     /* ---------------------------------------------
        REVENUE (MTD)
@@ -78,15 +91,19 @@ export const getAdminDashboard = async (req, res) => {
     /* ---------------------------------------------
        USER SIGNUP TREND  (FROM v_customers)
     --------------------------------------------- */
-    const recentCustomers = customers.filter(
-      (u) => u.joined && new Date(u.joined) >= sixMonthsAgo
-    );
 
-    const userGrowthTrend = {};
-    recentCustomers.forEach((u) => {
-      const m = formatMonth(u.joined);
-      userGrowthTrend[m] = (userGrowthTrend[m] || 0) + 1;
-    });
+const recentCustomers = customers.filter(
+  (u) => u.created_at && new Date(u.created_at) >= sixMonthsAgo
+);
+
+const userGrowthTrend = {};
+
+recentCustomers.forEach((u) => {
+  const m = formatMonth(u.created_at);
+  userGrowthTrend[m] = (userGrowthTrend[m] || 0) + 1;
+});
+
+
 
     /* ---------------------------------------------
        MERGE TRENDS
