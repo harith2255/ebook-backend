@@ -33,30 +33,40 @@ async function fetchAllUsers() {
    2️⃣ GET RECIPIENTS
 ------------------------------------------------------- */
 async function getRecipients(type, customList = []) {
-  const users = await fetchAllUsers();
+  // always fetch customers instead of auth.users
+  const { data: customers, error } = await supabaseAdmin
+    .from("v_customers")
+    .select("id, email, status, plan");
 
-  if (!users.length) return [];
+  if (!customers?.length) return [];
 
   switch (type) {
     case "all":
-      return users;
+    
+
+      return customers.filter(c => 
+  c.status === "Active" &&
+  !c.email.includes("admin")
+);
+
 
     case "active":
-      return users.filter(u => u.user_metadata?.status === "active");
+      return customers.filter(c => c.status === "Active");
 
     case "inactive":
-      return users.filter(u => u.user_metadata?.status === "inactive");
+      return customers.filter(c => c.status !== "Active");
 
     case "trial":
-      return users.filter(u => u.user_metadata?.plan === "trial");
+      return customers.filter(c => c.plan === "Trial");
 
     case "custom":
-      return users.filter(u => customList.includes(u.email));
+      return customers.filter(c => customList.includes(c.email));
 
     default:
       return [];
   }
 }
+
 
 /* -------------------------------------------------------
    3️⃣ SEND NOTIFICATION
@@ -73,43 +83,28 @@ export const sendNotification = async (req, res) => {
       return res.json({ message: "No recipients match your selection." });
     }
 
-    let delivered = 0;
+    let delivered = recipients.length; // count unique users only
 
-    /* -----------------------------
-       📧 EMAIL (DEV MODE SKIPPED)
-    ------------------------------- */
-    if (notification_type === "email" || notification_type === "both") {
-      console.log("📨 Email sending skipped (dev mode)");
-      delivered += recipients.length;
-    }
-
-    /* -----------------------------
-       🌐 WEBSITE NOTIFICATIONS
-    ------------------------------- */
-    if (notification_type === "website" || notification_type === "both") {
-      for (const user of recipients) {
-        await supabaseAdmin.from("user_notifications").insert({
-          user_id: user.id,
-          title: subject,
-          message,
-          link: "/notifications",
-          is_read: false,
-        });
-      }
-      delivered += recipients.length;
-    }
 
     /* -----------------------------
        📝 LOG ACTION (ONE ENTRY ONLY)
     ------------------------------- */
-    await supabaseAdmin.from("notification_logs").insert({
-      id: crypto.randomUUID(),
-      subject,
-      message,
-      recipient_type,
-      delivered_count: delivered,
-      created_at: new Date(),
-    });
+    const { data, error } = await supabaseAdmin
+  .from("notification_logs")
+  .insert({
+    subject,
+    message,
+    recipient_type,
+    notification_type,      // REQUIRED!
+    delivered_count: delivered,
+    custom_list: Array.isArray(custom_list) ? custom_list : null,
+  })
+  .select()
+  .single();
+
+if (error) {
+  console.error("❌ notification_logs insert error:", error);
+}
 
     return res.json({
       message: "Notification sent successfully",

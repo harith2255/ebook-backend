@@ -1,5 +1,5 @@
 // controllers/admin/reportsController.js
-import supabase from "../../utils/supabaseClient.js";
+import { supabaseAdmin } from "../../utils/supabaseClient.js";
 
 /* -------------------------------------------------------
    Helper: Month Names
@@ -9,57 +9,87 @@ const MONTHS = [
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
 ];
 
+// Build last 12 months with labels + keys
+function buildLast12Months() {
+  const now = new Date();
+  const months = [];
+
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const key = `${d.getFullYear()}-${d.getMonth()}`; // e.g. "2025-11"
+    const label = `${MONTHS[d.getMonth()]} ${String(d.getFullYear()).slice(-2)}`; // "Dec 25"
+
+    months.push({
+      key,
+      label,
+      year: d.getFullYear(),
+      monthIndex: d.getMonth(),
+      revenue: 0,
+      users: 0,
+      books: 0,
+    });
+  }
+
+  return months;
+}
+
 /* -------------------------------------------------------
    1. GET ANALYTICS (Revenue + Users + Books)
 ------------------------------------------------------- */
 export const getAnalytics = async (req, res) => {
   try {
-    /* ---------------- Revenue ------------------ */
-    const { data: subscriptions, error: subErr } = await supabase
-      .from("subscriptions")
-      .select("amount, created_at");
+    const months = buildLast12Months();
+    const monthMap = new Map(months.map(m => [m.key, m]));
 
-    if (subErr) return res.status(400).json({ error: subErr.message });
+    const oldest = months[0];
+    const oldestDate = new Date(oldest.year, oldest.monthIndex, 1);
 
+    /* ---------------- Revenue (from revenue table) ---------------- */
+    const { data: revenueRows, error: revErr } = await supabaseAdmin
+      .from("revenue")
+      .select("amount, created_at, item_type")
+      .gte("created_at", oldestDate.toISOString());
 
-    /* ---------------- Book Sales ---------------- */
-    const { data: bookSales, error: bookErr } = await supabase
-      .from("book_sales")
-      .select("created_at");
+    if (revErr) return res.status(400).json({ error: revErr.message });
 
-    if (bookErr) return res.status(400).json({ error: bookErr.message });
+    // Aggregate revenue + books sold
+    revenueRows?.forEach(row => {
+      const d = new Date(row.created_at);
+      const key = `${d.getFullYear()}-${d.getMonth()}`;
+      const bucket = monthMap.get(key);
+      if (!bucket) return;
 
+      const amount = Number(row.amount || 0);
+      bucket.revenue += amount;
 
-    /* ---------------- Users (auth) -------------- */
-    const { data: authUsers, error: userErr } =
-      await supabase.auth.admin.listUsers();
+      if (row.item_type === "book") {
+        bucket.books += 1;
+      }
+    });
+
+    /* ---------------- Users (from v_customers) ---------------- */
+    const { data: usersRows, error: userErr } = await supabaseAdmin
+      .from("v_customers")
+      .select("id, created_at")
+      .gte("created_at", oldestDate.toISOString());
 
     if (userErr) return res.status(400).json({ error: userErr.message });
 
-    const allUsers = authUsers?.users || [];
-
-
-    /* ------------------------------------------------
-       Build analytics for ALL 12 months
-    ------------------------------------------------ */
-    const analytics = MONTHS.map((m, i) => {
-      const revenue = subscriptions
-        ?.filter(s => new Date(s.created_at).getMonth() === i)
-        .reduce((sum, row) => sum + Number(row.amount), 0);
-
-      const users = allUsers
-        .filter(u => new Date(u.created_at).getMonth() === i).length;
-
-      const books = bookSales
-        ?.filter(b => new Date(b.created_at).getMonth() === i).length;
-
-      return {
-        month: m,
-        revenue,
-        users,
-        books,
-      };
+    usersRows?.forEach(u => {
+      const d = new Date(u.created_at);
+      const key = `${d.getFullYear()}-${d.getMonth()}`;
+      const bucket = monthMap.get(key);
+      if (!bucket) return;
+      bucket.users += 1;
     });
+
+    // Convert to frontend shape
+    const analytics = months.map(m => ({
+      month: m.label,        // "Dec 25"
+      revenue: m.revenue,    // number
+      users: m.users,        // number
+      books: m.books,        // number
+    }));
 
     return res.json({ analytics });
 
@@ -75,7 +105,7 @@ export const getAnalytics = async (req, res) => {
 ------------------------------------------------------- */
 export const getReports = async (req, res) => {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from("reports")
       .select("*")
       .order("created_at", { ascending: false });
@@ -91,116 +121,130 @@ export const getReports = async (req, res) => {
 
 
 /* -------------------------------------------------------
-   3. Generate CSV Report and Upload to Storage
-------------------------------------------------------- */
-/* -------------------------------------------------------
    3. Generate Analytics CSV (Revenue + Users + Books)
 ------------------------------------------------------- */
 export const generateReport = async (req, res) => {
   try {
-    const MONTHS = [
-      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
-    ];
+    const months = buildLast12Months();
+    const monthMap = new Map(months.map((m) => [m.key, m]));
 
-    /* ---------------- Revenue (subscriptions) ---------------- */
-    const { data: subscriptions, error: subErr } = await supabase
-      .from("subscriptions")
-      .select("amount, created_at");
+    const oldest = months[0];
+    const oldestDate = new Date(oldest.year, oldest.monthIndex, 1);
 
-    if (subErr) return res.status(400).json({ error: subErr.message });
+    /* ---------------- Revenue (from revenue) ---------------- */
+    const { data: revenueRows, error: revErr } = await supabaseAdmin
+      .from("revenue")
+      .select("amount, created_at, item_type")
+      .gte("created_at", oldestDate.toISOString());
 
-    /* ---------------- Books Sold ---------------- */
-    const { data: bookSales, error: bookErr } = await supabase
-      .from("book_sales")
-      .select("created_at");
+    if (revErr)
+      return res.status(400).json({ error: revErr.message });
 
-    if (bookErr) return res.status(400).json({ error: bookErr.message });
+    revenueRows?.forEach((row) => {
+      const d = new Date(row.created_at);
+      const key = `${d.getFullYear()}-${d.getMonth()}`;
+      const bucket = monthMap.get(key);
+      if (!bucket) return;
 
-    /* ---------------- Users (auth) ---------------- */
-    const { data: authUsers, error: userErr } =
-      await supabase.auth.admin.listUsers();
+      bucket.revenue += Number(row.amount || 0);
 
-    if (userErr) return res.status(400).json({ error: userErr.message });
-
-    const allUsers = authUsers?.users || [];
-
-
-    /* -------------------------------------------------------
-       Build Analytics for ALL 12 months
-    ------------------------------------------------------- */
-    const analytics = MONTHS.map((m, i) => {
-      const revenue = subscriptions
-        ?.filter(s => new Date(s.created_at).getMonth() === i)
-        .reduce((sum, row) => sum + Number(row.amount), 0);
-
-      const users = allUsers
-        ?.filter(u => new Date(u.created_at).getMonth() === i).length;
-
-      const books = bookSales
-        ?.filter(b => new Date(b.created_at).getMonth() === i).length;
-
-      return { month: m, revenue, users, books };
+      if (row.item_type === "book") bucket.books++;
     });
 
+    /* ---------------- Users (from v_customers) ---------------- */
+    const { data: usersRows, error: userErr } = await supabaseAdmin
+      .from("v_customers")
+      .select("id, created_at")
+      .gte("created_at", oldestDate.toISOString());
+
+    if (userErr)
+      return res.status(400).json({ error: userErr.message });
+
+    usersRows?.forEach((u) => {
+      const d = new Date(u.created_at);
+      const key = `${d.getFullYear()}-${d.getMonth()}`;
+      const bucket = monthMap.get(key);
+      if (!bucket) return;
+      bucket.users++;
+    });
+
+    /* -------------------------------------------------------
+       Build result data
+    ------------------------------------------------------- */
+    const analytics = months.map((m) => ({
+      month: m.label,
+      revenue: m.revenue,
+      users: m.users,
+      books: m.books,
+    }));
 
     /* -------------------------------------------------------
        Convert to CSV
     ------------------------------------------------------- */
     const csvHeader = "month,revenue,users,books\n";
-    const csvRows = analytics.map(a =>
-      `${a.month},${a.revenue},${a.users},${a.books}`
+    const csvRows = analytics.map(
+      (a) => `${a.month},${a.revenue},${a.users},${a.books}`
     );
-
     const csv = csvHeader + csvRows.join("\n");
 
-
     /* -------------------------------------------------------
-       Upload CSV to Supabase Storage
+       Upload CSV to Supabase Storage  (Buffer!)
     ------------------------------------------------------- */
     const fileName = `analytics-${Date.now()}.csv`;
 
-    const { error: uploadErr } = await supabase.storage
+    const buffer = Buffer.from(csv, "utf-8");
+
+    const { error: uploadErr } = await supabaseAdmin.storage
       .from("reports")
-      .upload(fileName, csv, {
+      .upload(fileName, buffer, {
         contentType: "text/csv",
+        cacheControl: "3600",
         upsert: true,
       });
 
-    if (uploadErr) return res.status(400).json({ error: uploadErr.message });
+    if (uploadErr) {
+      console.error("📦 Storage upload error:", uploadErr);
+      return res.status(400).json({ error: uploadErr.message });
+    }
 
-    const { data: urlData } = supabase.storage
+    /* -------------------------------------------------------
+       Get public URL
+    ------------------------------------------------------- */
+    const urlObj = supabaseAdmin.storage
       .from("reports")
       .getPublicUrl(fileName);
 
+    const publicURL = urlObj?.data?.publicUrl;
+
+    if (!publicURL)
+      return res.status(500).json({ error: "Failed to generate public URL" });
 
     /* -------------------------------------------------------
        Save metadata in "reports" table
     ------------------------------------------------------- */
-    await supabase.from("reports").insert([
+    await supabaseAdmin.from("reports").insert([
       {
         name: "Platform Analytics Report",
-        description: "Revenue, user growth, and books sold (12 months)",
+        description: "Revenue, user growth, and books sold (last 12 months)",
         format: "CSV",
-        file_url: urlData.publicUrl
-      }
+        file_url: publicURL,
+      },
     ]);
-
 
     /* -------------------------------------------------------
        Response
     ------------------------------------------------------- */
-    res.json({
+    return res.json({
       message: "Analytics report generated successfully",
-      url: urlData.publicUrl,
+      url: publicURL,
     });
-
   } catch (err) {
     console.error("🔥 generateReport error:", err);
-    res.status(500).json({ error: "Failed to generate report" });
+    return res.status(500).json({
+      error: err.message || "Internal server error",
+    });
   }
 };
-
 
 
 /* -------------------------------------------------------
@@ -210,7 +254,7 @@ export const downloadReport = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from("reports")
       .select("file_url")
       .eq("id", id)
@@ -220,11 +264,10 @@ export const downloadReport = async (req, res) => {
       return res.status(404).json({ error: "Report not found" });
     }
 
-   const response = await fetch(data.file_url);
-const buffer = await response.arrayBuffer();
-res.setHeader("Content-Type", "text/csv");
-res.send(Buffer.from(buffer));
-
+    const response = await fetch(data.file_url);
+    const buffer = await response.arrayBuffer();
+    res.setHeader("Content-Type", "text/csv");
+    res.send(Buffer.from(buffer));
   } catch (err) {
     console.error("🔥 downloadReport error:", err);
     res.status(500).json({ error: "Failed to download report" });
