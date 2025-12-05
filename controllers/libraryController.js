@@ -14,25 +14,26 @@ export const getUserLibrary = async (req, res) => {
       last_page,
       added_at,
       book_id,
-     ebooks: ebooks!inner (
-  id,
-  title,
-  author,
-  category,
-  description,
-  cover_url,
-  file_url,
-  pages,
-  price,
-  sales
-)
-
+      ebooks (
+        id,
+        title,
+        author,
+        category,
+        description,
+        cover_url,
+        file_url,
+        pages,
+        price,
+        sales
+      )
     `)
-    .eq("user_id", userId);
+    .eq("user_id", userId)
+    .order("added_at", { ascending: false });
 
   if (error) return res.status(400).json({ error: error.message });
   res.json(data);
 };
+
 
 /* ============================================
    ➕ ADD BOOK TO LIBRARY
@@ -390,70 +391,88 @@ export const updateCollection = async (req, res) => {
 ============================================ */
 export const updateReadingProgress = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user?.id;
     const { bookId } = req.params;
     let { progress, last_page } = req.body;
 
-    if (typeof progress !== "number" || progress < 0)
-      return res.status(400).json({ error: "Invalid progress" });
+    console.log("📥 UPDATE REQUEST RAW INPUT:", {
+      params: req.params,
+      body: req.body,
+      userId,
+    });
 
-    if (!last_page || last_page < 1) last_page = 1;
-
-    // convert fractional value
-    if (progress > 0 && progress < 1) {
-      progress = progress * 100;
+    // check missing values
+    if (!userId) {
+      console.error("❌ No userId in req.user");
+      return res.status(401).json({ error: "Unauthorized" });
     }
 
-    progress = Math.min(100, Math.round(progress));
+    if (!bookId) {
+      console.error("❌ No bookId in params");
+      return res.status(400).json({ error: "Missing bookId param" });
+    }
 
+    // parse numbers safely
+    progress = Number(progress);
+    last_page = Number(last_page);
+
+    if (isNaN(progress) || isNaN(last_page)) {
+      console.error("❌ Invalid numeric input", { progress, last_page });
+      return res.status(400).json({ error: "Invalid numeric values" });
+    }
+
+    const safeProgress = Math.min(100, Math.max(0, Math.round(progress)));
     const now = new Date().toISOString();
 
-    const { data: existing, error: exErr } = await supabase
+    console.log("📤 DB UPDATE PAYLOAD:", {
+      bookId,
+      userId,
+      progress: safeProgress,
+      last_page,
+      completed_at: safeProgress === 100 ? now : null,
+    });
+
+    const { data, error } = await supabase
       .from("user_library")
-      .select("id, progress")
+      .update({
+        progress: safeProgress,
+        last_page,
+        completed_at: safeProgress === 100 ? now : null,
+      })
       .eq("user_id", userId)
       .eq("book_id", bookId)
-      .maybeSingle();
+      .select("*");  // force select so we can see result
 
-    if (exErr) return res.status(400).json({ error: exErr.message });
+    console.log("📥 DB RESULT:", { data, error });
 
-    if (!existing)
-      return res.status(404).json({ error: "Not in library" });
+    // supabase returned an error
+    if (error) {
+      console.error("❌ DB ERROR:", error);
+      return res.status(400).json({ error: error.message });
+    }
 
-    // ignore regression
-    if (progress < existing.progress) {
-      return res.json({
-        message: "Ignored regression",
-        progress: existing.progress,
-        last_page,
+    // supabase returned no matching rows
+    if (!data || data.length === 0) {
+      console.error("❌ No row updated — possible RLS block or bad bookId");
+      return res.status(404).json({
+        error: "Progress update failed, record not found",
       });
     }
 
-    const { error } = await supabase
-      .from("user_library")
-      .update({
-        progress,
-        last_page,
-        completed_at: progress === 100 ? now : null,
-      })
-      .eq("user_id", userId)
-      .eq("book_id", bookId);
-
-    if (error) return res.status(400).json({ error: error.message });
-
     return res.json({
-      message: "Progress updated",
-      progress,
-      last_page,
-      completed: progress === 100,
-      bookId,
+      success: true,
+      data: data[0],
     });
 
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: "Failed to update progress" });
+    console.error("💥 SERVER CRASH:", err);
+    return res.status(500).json({ error: "Server error updating progress" });
   }
 };
+
+
+
+
 
 
 

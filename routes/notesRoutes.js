@@ -10,6 +10,7 @@ import {
   deleteNoteHighlight,
   getNoteLastPage,
   saveNoteLastPage,
+  getNotePreviewPdf,
 } from "../controllers/notesController.js";
 
 import { verifySupabaseAuth } from "../middleware/authMiddleware.js";
@@ -43,7 +44,7 @@ router.post(
 );
 
 // Get note details + DRM
-router.get("/:id", verifySupabaseAuth.required, drmCheck, getNoteById);
+router.get("/:id", verifySupabaseAuth.optional, getNoteById);
 
 // Note Highlights
 router.get("/highlights/:id", verifySupabaseAuth.required, getNoteHighlights);
@@ -53,6 +54,8 @@ router.delete(
   verifySupabaseAuth.required,
   deleteNoteHighlight
 );
+// routes/notes.js
+router.get("/:id/preview", getNotePreviewPdf);
 
 // Last page tracking
 router.get("/lastpage/:id", verifySupabaseAuth.required, getNoteLastPage);

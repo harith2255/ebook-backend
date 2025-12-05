@@ -1,31 +1,134 @@
 import supabase from "../utils/supabaseClient.js";
 
 /**
- * GET /api/subscriptions/plans
- * Public (returns all plans)
+ * POST /api/subscriptions/upgrade
+ * Body: { planId }
+ * Protected - create/replace subscription + record revenue
  */
-export const getPlans = async (req, res) => {
+export const upgradeSubscription = async (req, res) => {
   try {
-    const { data, error } = await supabase
+    const userId = req.user.id;
+    const { planId } = req.body;
+
+    if (!planId) {
+      return res.status(400).json({ error: "planId required" });
+    }
+
+    // 1️⃣ Fetch selected plan
+    const { data: plan, error: planErr } = await supabase
       .from("subscription_plans")
       .select("*")
-      .order("price", { ascending: true });
+      .eq("id", planId)
+      .single();
 
-    if (error) throw error;
+    if (planErr) {
+      console.error("subscription_plans error:", planErr);
+      return res.status(400).json({ error: "Invalid planId" });
+    }
+    if (!plan) {
+      return res.status(404).json({ error: "Plan not found" });
+    }
 
-    res.json(data);
+    const price = Number(plan.price) || 0;
 
+    // 2️⃣ Create payment transaction
+    const { error: txErr } = await supabase
+      .from("payments_transactions")
+      .insert({
+        user_id: userId,
+        plan_id: plan.id,          // plan.id is numeric (bigint)
+        amount: price,
+        currency: "INR",
+        method: "manual-test",
+        status: "completed",
+        description: `Purchase ${plan.name}`,
+      });
+
+    if (txErr) {
+      console.error("payments_transactions error:", txErr);
+      return res.status(500).json({ error: "Failed to create transaction" });
+    }
+
+    // 3️⃣ Record revenue
+    // IMPORTANT:
+    // - item_id (uuid) is NOT used for numeric plan ids
+    // - store numeric plan id in old_item_id
+    const { error: revErr } =await supabase.from("revenue").insert({
+  user_id: userId,
+  amount: price,
+  item_type: "subscription",
+  item_id: null,            // must be null
+  old_item_id: plan.id,     // numeric
+  payment_id: null,
+  created_at: new Date().toISOString(),
+});
+
+    if (revErr) {
+      console.error("revenue insert error:", revErr);
+      // not fatal for user, but log it
+    }
+
+    // 4️⃣ Compute expiry date
+    const now = new Date();
+    let expiresAt;
+
+    if (plan.period === "monthly") {
+      const future = new Date(now);
+      future.setMonth(future.getMonth() + 1);
+      expiresAt = future.toISOString();
+    } else {
+      const future = new Date(now);
+      future.setFullYear(future.getFullYear() + 1);
+      expiresAt = future.toISOString();
+    }
+
+    // 5️⃣ Deactivate old subscriptions
+    const { error: deactivateErr } = await supabase
+      .from("user_subscriptions")
+      .update({ status: "expired" })
+      .eq("user_id", userId)
+      .eq("status", "active");
+
+    if (deactivateErr) {
+      console.error("user_subscriptions deactivate error:", deactivateErr);
+      // not fatal, user still gets new active one
+    }
+
+    // 6️⃣ Create new active subscription
+    const { data: newSub, error: subErr } = await supabase
+      .from("user_subscriptions")
+      .insert({
+        user_id: userId,
+        plan_id: plan.id, // same numeric id as in subscription_plans
+        started_at: new Date().toISOString(),
+        expires_at: expiresAt,
+        status: "active",
+      })
+      .select()
+      .single();
+
+    if (subErr) {
+      console.error("user_subscriptions insert error:", subErr);
+      return res.status(500).json({ error: "Failed to create subscription" });
+    }
+
+    // 7️⃣ Return clean object
+    return res.json({
+      success: true,
+      subscription: {
+        id: plan.id,
+        name: plan.name,
+        price: plan.price,
+        period: plan.period,
+        renewsOn: expiresAt,
+      },
+    });
   } catch (err) {
-    console.error("getPlans error:", err.message || err);
-    res.status(500).json({ error: "Failed to load plans" });
+    console.error("upgradeSubscription error:", err.message || err);
+    return res.status(500).json({ error: "Upgrade failed" });
   }
 };
 
-
-/**
- * GET /api/subscriptions/active
- * Protected - returns current user's active subscription
- */
 export const getActiveSubscription = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -68,115 +171,28 @@ export const getActiveSubscription = async (req, res) => {
   }
 };
 
-
-/**
- * POST /api/subscriptions/upgrade
- * Body: { planId }
- * Protected - create/replace subscription + record revenue
- */
-export const upgradeSubscription = async (req, res) => {
+export const getPlans = async (req, res) => {
   try {
-    const userId = req.user.id;
-    const { planId } = req.body;
-
-    if (!planId) return res.status(400).json({ error: "planId required" });
-
-    // fetch selected plan
-    const { data: plan, error: planErr } = await supabase
+    const { data, error } = await supabase
       .from("subscription_plans")
       .select("*")
-      .eq("id", planId)
-      .single();
+      .order("price", { ascending: true });
 
-    if (planErr) throw planErr;
-    if (!plan) return res.status(404).json({ error: "Plan not found" });
+    if (error) throw error;
 
-    const price = Number(plan.price) || 0;
-
-    // 1️⃣ create payment transaction
-    const { error: txErr } = await supabase
-      .from("payments_transactions")
-      .insert({
-        user_id: userId,
-        plan_id: planId,
-        amount: price,
-        currency: "INR",
-        method: "manual-test",
-        status: "completed",
-        description: `Purchase ${plan.name}`,
-      });
-
-    if (txErr) throw txErr;
-
-    // ⭐️ 2️⃣ record revenue
-    const { error: revErr } = await supabase
-      .from("revenue")
-      .insert({
-        user_id: userId,
-        amount: price,
-        item_type: "subscription",
-        item_id: plan.id,
-      });
-
-    if (revErr) throw revErr;
-
-
-    // 3️⃣ compute expiry date (⚠️ avoid mutating date)
-    const now = new Date();
-    let expiresAt;
-
-    if (plan.period === "monthly") {
-      const future = new Date(now);
-      future.setMonth(future.getMonth() + 1);
-      expiresAt = future.toISOString();
-    } else {
-      const future = new Date(now);
-      future.setFullYear(future.getFullYear() + 1);
-      expiresAt = future.toISOString();
-    }
-
-
-    // 4️⃣ deactivate old subscriptions
-    await supabase
-      .from("user_subscriptions")
-      .update({ status: "expired" })
-      .eq("user_id", userId)
-      .eq("status", "active");
-
-
-    // 5️⃣ create new active subscription
-    const { data: newSub, error: subErr } = await supabase
-      .from("user_subscriptions")
-      .insert({
-        user_id: userId,
-        plan_id: planId,
-        started_at: new Date().toISOString(),
-        expires_at: expiresAt,
-        status: "active",
-      })
-      .select()
-      .single();
-
-    if (subErr) throw subErr;
-
-
-    // 6️⃣ return clean object to frontend
-    res.json({
-      success: true,
-      subscription: {
-        id: plan.id,
-        name: plan.name,
-        price: plan.price,
-        period: plan.period,
-        renewsOn: expiresAt,
-      },
-    });
+    res.json(data);
 
   } catch (err) {
-    console.error("upgradeSubscription error:", err.message || err);
-    res.status(500).json({ error: "Upgrade failed" });
+    console.error("getPlans error:", err.message || err);
+    res.status(500).json({ error: "Failed to load plans" });
   }
 };
+
+
+/**
+ * GET /api/subscriptions/active
+ * Protected - returns current user's active subscription
+ */
 
 
 /**

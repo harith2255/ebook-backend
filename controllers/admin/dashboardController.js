@@ -1,8 +1,10 @@
 import { supabaseAdmin } from "../../utils/supabaseClient.js";
 
-const formatMonth = (date) =>
-  new Date(date).toLocaleString("en-US", { month: "short" });
+// Format month name from date
+const formatMonth = (d) =>
+  new Date(d).toLocaleString("en-US", { month: "short" });
 
+// Percent change helper
 function percentChange(current, previous) {
   current = Number(current) || 0;
   previous = Number(previous) || 0;
@@ -12,106 +14,102 @@ function percentChange(current, previous) {
 
 export const getAdminDashboard = async (req, res) => {
   try {
-    /* ---------------------------------------------
-       USERS FROM v_customers  (FIXED)
-    --------------------------------------------- */
-    /* ---------------------------------------------
-   USERS FROM v_customers
---------------------------------------------- */
-const { data: customers, error: custErr } = await supabaseAdmin
-  .from("v_customers")
-  .select("id, created_at");
+    /* ======================================================
+       USERS
+    ====================================================== */
+    const { data: customers, error: customersErr } = await supabaseAdmin
+      .from("v_customers")
+      .select("id, created_at");
 
-if (custErr) {
-  console.error("v_customers fetch error:", custErr);
-  return res.status(500).json({ error: "Cannot load user count" });
-}
+    if (customersErr) {
+      console.error("v_customers error:", customersErr);
+      return res.status(500).json({ error: "Failed to fetch user data" });
+    }
 
-const totalUsers = customers.length;
+    const totalUsers = customers?.length || 0;
+    const nowISO = new Date().toISOString();
 
-const nowISO = new Date().toISOString();
+    /* ======================================================
+       ACTIVE SUBSCRIPTIONS
+    ====================================================== */
+    const { count: activeSubs, error: subsErr } = await supabaseAdmin
+      .from("user_subscriptions")
+      .select("*", { count: "exact", head: true })
+      .eq("status", "active")
+      .gte("expires_at", nowISO);
 
-/* ---------------------------------------------
-   ACTIVE SUBSCRIPTIONS
---------------------------------------------- */
-const { count: activeSubs, error: subErr } = await supabaseAdmin
-  .from("user_subscriptions")
-  .select("*", { count: "exact", head: true })
-  .eq("status", "active")
-  .gte("expires_at", nowISO);
+    if (subsErr) {
+      console.error("subscriptions error:", subsErr);
+    }
 
-if (subErr) {
-  console.error("user_subscriptions error:", subErr);
-}
+    /* ======================================================
+       BOOKS SOLD
+    ====================================================== */
+    const { count: booksSold, error: booksErr } = await supabaseAdmin
+      .from("revenue")
+      .select("id", { count: "exact", head: true })
+      .eq("item_type", "book");
 
-/* ---------------------------------------------
-   BOOKS SOLD (revenue item_type=ebook)
---------------------------------------------- */
-const { count: booksSold, error: bookErr } = await supabaseAdmin
-  .from("revenue")
-  .select("id", { count: "exact", head: true })
-  .eq("item_type", "book");
+    if (booksErr) {
+      console.error("books error:", booksErr);
+    }
 
-if (bookErr) {
-  console.error("revenue item_type ebook error:", bookErr);
-}
-
-
-    /* ---------------------------------------------
-       REVENUE (MTD)
-    --------------------------------------------- */
+    /* ======================================================
+       REVENUE MTD
+    ====================================================== */
     const firstDay = new Date();
     firstDay.setDate(1);
 
-    const { data: revenueMonth } = await supabaseAdmin
+    const { data: revenueMonth, error: revMonthErr } = await supabaseAdmin
       .from("revenue")
       .select("amount, created_at")
       .gte("created_at", firstDay.toISOString());
 
+    if (revMonthErr) {
+      console.error("revenue MTD error:", revMonthErr);
+    }
+
     const revenueMTD =
       revenueMonth?.reduce((sum, r) => sum + Number(r.amount), 0) || 0;
 
-    /* ---------------------------------------------
-       REVENUE TREND (LAST 6 MONTHS)
-    --------------------------------------------- */
+    /* ======================================================
+       REVENUE TREND 6 MONTHS
+    ====================================================== */
     const sixMonthsAgo = new Date();
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
 
-    const { data: revRows } = await supabaseAdmin
+    const { data: rows, error: trendErr } = await supabaseAdmin
       .from("revenue")
       .select("amount, created_at")
       .gte("created_at", sixMonthsAgo.toISOString());
 
+    if (trendErr) {
+      console.error("revenue trend error:", trendErr);
+    }
+
     const revenueTrend = {};
-    revRows?.forEach((r) => {
+    rows?.forEach((r) => {
       const m = formatMonth(r.created_at);
       revenueTrend[m] = (revenueTrend[m] || 0) + Number(r.amount);
     });
 
-    /* ---------------------------------------------
-       USER SIGNUP TREND  (FROM v_customers)
-    --------------------------------------------- */
+    /* ======================================================
+       USER SIGNUP TREND
+    ====================================================== */
+    const recentUsers = customers?.filter(
+      (u) => u.created_at && new Date(u.created_at) >= sixMonthsAgo
+    );
 
-const recentCustomers = customers.filter(
-  (u) => u.created_at && new Date(u.created_at) >= sixMonthsAgo
-);
+    const userTrend = {};
+    recentUsers?.forEach((u) => {
+      const m = formatMonth(u.created_at);
+      userTrend[m] = (userTrend[m] || 0) + 1;
+    });
 
-const userGrowthTrend = {};
-
-recentCustomers.forEach((u) => {
-  const m = formatMonth(u.created_at);
-  userGrowthTrend[m] = (userGrowthTrend[m] || 0) + 1;
-});
-
-
-
-    /* ---------------------------------------------
-       MERGE TRENDS
-    --------------------------------------------- */
-    const months = [...new Set([
-      ...Object.keys(revenueTrend),
-      ...Object.keys(userGrowthTrend),
-    ])];
+    /* ======================================================
+       MERGE TRENDS FOR CHART
+    ====================================================== */
+    const months = [...new Set([...Object.keys(revenueTrend), ...Object.keys(userTrend)])];
 
     const monthOrder = [
       "Jan","Feb","Mar","Apr","May","Jun",
@@ -125,73 +123,74 @@ recentCustomers.forEach((u) => {
     const chartData = sortedMonths.map((m) => ({
       month: m,
       revenue: revenueTrend[m] || 0,
-      users: userGrowthTrend[m] || 0,
+      users: userTrend[m] || 0,
     }));
 
-    /* ---------------------------------------------
-       KPI % CHANGES
-    --------------------------------------------- */
-    const prevMonthKey =
-      sortedMonths.length >= 2 ? sortedMonths[sortedMonths.length - 2] : null;
+    /* ======================================================
+       KPI % DIFF
+    ====================================================== */
+    const prevMonth = sortedMonths.length >= 2
+      ? sortedMonths[sortedMonths.length - 2]
+      : null;
 
-    const prevUsers = Number(userGrowthTrend[prevMonthKey] || 0);
-    const prevRevenue = Number(revenueTrend[prevMonthKey] || 0);
+    const prevUsers = userTrend[prevMonth] || 0;
+    const prevRevenue = revenueTrend[prevMonth] || 0;
+
+    const userGrowthPercent = percentChange(recentUsers?.length, prevUsers);
+    const revenueGrowthPercent = percentChange(revenueMTD, prevRevenue);
+
     const prevBooks = booksSold > 1 ? booksSold - 1 : 1;
     const prevSubs = activeSubs > 1 ? activeSubs - 1 : 1;
 
-    const userGrowthPercent = percentChange(recentCustomers.length, prevUsers);
-    const revenueGrowthPercent = percentChange(revenueMTD, prevRevenue);
     const booksGrowthPercent = percentChange(booksSold, prevBooks);
     const subsGrowthPercent = percentChange(activeSubs, prevSubs);
 
-/* -------------------------------------------------------
-   RECENT ACTIVITY (Last 10 + Pagination Support)
-------------------------------------------------------- */
-const page = Number(req.query.activity_page) || 1;
-const limit = 10;
-const start = (page - 1) * limit;
-const end = start + limit - 1;
+    /* ======================================================
+       RECENT ACTIVITY (Exclude Login)
+    ====================================================== */
+    const page = Number(req.query.page) || 1;
+    const limit = 10;
+    const start = (page - 1) * limit;
+    const end = start + limit - 1;
 
-const { data: recentActivity, count, error: actErr } = await supabaseAdmin
-  .from("activity_log")
-  .select("*", { count: "exact" })
-  .order("created_at", { ascending: false })
-  .range(start, end);
+    const { data: activities, count, error: actErr } = await supabaseAdmin
+      .from("activity_log")
+      .select("*", { count: "exact" })
+      .neq("type", "login") // remove login spam
+      .order("created_at", { ascending: false })
+      .range(start, end);
 
-if (actErr) {
-  console.error("activity_log error:", actErr);
-}
+    if (actErr) {
+      console.error("activity error:", actErr);
+    }
 
-const totalPages = Math.ceil((count || 0) / limit);
+    const totalPages = Math.ceil((count || 0) / limit);
 
-
-
-    /* ---------------------------------------------
-       SEND RESPONSE
-    --------------------------------------------- */
+    /* ======================================================
+       RESPONSE
+    ====================================================== */
     return res.json({
-  kpis: {
-    totalUsers,
-    activeSubs,
-    booksSold,
-    revenueMTD,
-    userGrowthPercent,
-    revenueGrowthPercent,
-    booksGrowthPercent,
-    subsGrowthPercent,
-  },
-  chartData,
-  recentActivity,
-  activityPagination: {
-    page,
-    totalPages,
-    total: count || 0
-  }
-});
+      kpis: {
+        totalUsers,
+        activeSubs,
+        booksSold,
+        revenueMTD,
+        userGrowthPercent,
+        revenueGrowthPercent,
+        booksGrowthPercent,
+        subsGrowthPercent,
+      },
+      chartData,
+      recentActivity: activities || [],
+      activityPagination: {
+        page,
+        totalPages,
+        total: count || 0,
+      },
+    });
 
-
-  } catch (error) {
-    console.error("Dashboard error:", error);
-    return res.status(500).json({ error: "Internal Server Error" });
+  } catch (err) {
+    console.error("Dashboard error:", err);
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
