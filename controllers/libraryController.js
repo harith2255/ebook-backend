@@ -755,3 +755,17 @@ export const saveStudySession = async (req, res) => {
   }
 };
 
+export const resetReading = async (req, res) => {
+  const userId = req.user.id;
+  const { bookId } = req.params;
+
+  const { error } = await supabase
+    .from("user_library")
+    .update({ progress: 0 })
+    .eq("user_id", userId)
+    .eq("book_id", bookId);
+
+  if (error) return res.status(400).json({ error: error.message });
+
+  res.json({ message: "Reading reset" });
+};

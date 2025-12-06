@@ -1,8 +1,10 @@
 import supabase from "../utils/supabaseClient.js";
 import axios from "axios";
+import { PDFDocument } from "pdf-lib"; // needed for preview PDF generation
 
 /* ============================
-   GET ALL NOTES
+   GET ALL NOTES (SAFE)
+   - No file_url, no sensitive fields
 ============================= */
 export const getAllNotes = async (req, res) => {
   try {
@@ -10,7 +12,20 @@ export const getAllNotes = async (req, res) => {
 
     let query = supabase
       .from("notes")
-      .select("*")
+      .select(
+        `
+        id,
+        title,
+        category,
+        author,
+        description,
+        pages,
+        rating,
+        downloads,
+        price,
+        created_at
+      `
+      )
       .order("created_at", { ascending: false });
 
     if (category && category !== "All") {
@@ -25,7 +40,7 @@ export const getAllNotes = async (req, res) => {
 
     if (error) throw error;
 
-    res.json(data);
+    res.json(data || []);
   } catch (err) {
     console.error("getAllNotes error:", err);
     res.status(500).json({ error: "Failed to fetch notes" });
@@ -34,11 +49,15 @@ export const getAllNotes = async (req, res) => {
 
 /* ============================
    GET NOTE BY ID + PREVIEW
-   (No PDF parsing – uses DB preview)
+   - Only returns file_url if user purchased or note is free
 ============================= */
 export const getNoteById = async (req, res) => {
   try {
     const noteId = Number(req.params.id);
+    if (!noteId || Number.isNaN(noteId)) {
+      return res.status(400).json({ error: "Invalid note id" });
+    }
+
     const userId = req.user?.id || null;
 
     const { data: note, error } = await supabase
@@ -52,7 +71,9 @@ export const getNoteById = async (req, res) => {
         file_url,
         description,
         preview_content,
-        cached_preview
+        cached_preview,
+        price,
+        pages
       `
       )
       .eq("id", noteId)
@@ -63,16 +84,10 @@ export const getNoteById = async (req, res) => {
       return res.status(404).json({ error: "Note not found" });
     }
 
-    // Determine preview text:
-    // 1) cached_preview (if you ever fill it)
-    // 2) preview_content (pre-filled at upload time)
-    // 3) fallback null
-    const previewText =
-      note.cached_preview ||
-      note.preview_content ||
-      null;
+    // Determine preview text
+    const previewText = note.cached_preview || note.preview_content || null;
 
-    // Check purchase status (optional)
+    // Check purchase status
     let isPurchased = false;
 
     if (userId) {
@@ -90,8 +105,16 @@ export const getNoteById = async (req, res) => {
       isPurchased = !!purchased;
     }
 
+    const isFree = note.price === 0 || note.price === "Free";
+
+    // 🔐 Only expose file_url if user can access full note
+    const safeNote = {
+      ...note,
+      file_url: isPurchased || isFree ? note.file_url : null,
+    };
+
     res.json({
-      note,
+      note: safeNote,
       isPurchased,
       preview_content: previewText,
     });
@@ -103,45 +126,95 @@ export const getNoteById = async (req, res) => {
 
 /* ============================
    DOWNLOAD NOTE (DRM)
+   - Only if purchased or free
 ============================= */
 export const incrementDownloads = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user?.id;
     const noteId = Number(req.params.id);
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    if (!noteId || Number.isNaN(noteId)) {
+      return res.status(400).json({ error: "Invalid note id" });
+    }
 
     const { data: note, error } = await supabase
       .from("notes")
-      .select("file_url, title")
+      .select("file_url, title, price")
       .eq("id", noteId)
-      .single();
+      .maybeSingle();
 
     if (error) throw error;
     if (!note) {
       return res.status(404).json({ error: "Note not found" });
     }
 
-    await supabase.from("downloaded_notes").insert({
+    const isFree = note.price === 0 || note.price === "Free";
+
+    if (!isFree) {
+      const { data: purchased, error: purchaseError } = await supabase
+        .from("notes_purchase")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("note_id", noteId)
+        .maybeSingle();
+
+      if (purchaseError) {
+        console.error("Purchase check error:", purchaseError);
+        return res
+          .status(500)
+          .json({ error: "Failed to verify purchase status" });
+      }
+
+      if (!purchased) {
+        return res
+          .status(403)
+          .json({ error: "Purchase required to download this note" });
+      }
+    }
+
+    const insertRes = await supabase.from("downloaded_notes").insert({
       user_id: userId,
       note_id: noteId,
     });
 
+    if (insertRes.error) throw insertRes.error;
+
     res.json({ success: true, file_url: note.file_url });
   } catch (err) {
     console.error("incrementDownloads error:", err);
-    res.status(400).json({ error: err.message || "Failed to download note" });
+    res
+      .status(400)
+      .json({ error: err.message || "Failed to download note" });
   }
 };
 
 /* ============================
    GET USER'S DOWNLOADED NOTES
+   - No file_url, just metadata
 ============================= */
 export const getDownloadedNotes = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
 
     const { data, error } = await supabase
       .from("downloaded_notes")
-      .select("note:notes(id, title, category, file_url)")
+      .select(
+        `
+        note:notes(
+          id,
+          title,
+          category
+        )
+      `
+      )
       .eq("user_id", userId);
 
     if (error) throw error;
@@ -158,7 +231,11 @@ export const getDownloadedNotes = async (req, res) => {
 ============================= */
 export const getPurchasedNotes = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
 
     const { data, error } = await supabase
       .from("notes_purchase")
@@ -179,8 +256,12 @@ export const getPurchasedNotes = async (req, res) => {
 ===================================================== */
 export const getNoteHighlights = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user?.id;
     const noteId = req.params.id;
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
 
     const { data, error } = await supabase
       .from("notes_highlights")
@@ -203,16 +284,12 @@ export const getNoteHighlights = async (req, res) => {
 ===================================================== */
 export const addNoteHighlight = async (req, res) => {
   try {
-    const userId = req.user.id;
-    const {
-      note_id,
-      page,
-      x_pct,
-      y_pct,
-      w_pct,
-      h_pct,
-      color,
-    } = req.body;
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const { note_id, page, x_pct, y_pct, w_pct, h_pct, color } = req.body;
 
     if (!note_id || !page) {
       return res
@@ -250,8 +327,12 @@ export const addNoteHighlight = async (req, res) => {
 ===================================================== */
 export const deleteNoteHighlight = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user?.id;
     const highlightId = req.params.id;
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
 
     const { error } = await supabase
       .from("notes_highlights")
@@ -273,8 +354,12 @@ export const deleteNoteHighlight = async (req, res) => {
 ===================================================== */
 export const getNoteLastPage = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user?.id;
     const noteId = req.params.id;
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
 
     const { data, error } = await supabase
       .from("notes_read_history")
@@ -297,11 +382,15 @@ export const getNoteLastPage = async (req, res) => {
 ===================================================== */
 export const saveNoteLastPage = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user?.id;
     const noteId = req.params.id;
     const { last_page } = req.body;
 
-    if (!last_page) {
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    if (!last_page || Number.isNaN(Number(last_page))) {
       return res.status(400).json({ error: "last_page is required" });
     }
 
@@ -314,13 +403,15 @@ export const saveNoteLastPage = async (req, res) => {
 
     if (error) throw error;
 
+    const payload = {
+      last_page,
+      updated_at: new Date().toISOString(),
+    };
+
     if (exists) {
       const { error: updateError } = await supabase
         .from("notes_read_history")
-        .update({
-          last_page,
-          updated_at: new Date().toISOString(),
-        })
+        .update(payload)
         .eq("id", exists.id);
 
       if (updateError) throw updateError;
@@ -333,8 +424,7 @@ export const saveNoteLastPage = async (req, res) => {
       .insert({
         user_id: userId,
         note_id: noteId,
-        last_page,
-        updated_at: new Date().toISOString(),
+        ...payload,
       });
 
     if (insertError) throw insertError;
@@ -346,51 +436,121 @@ export const saveNoteLastPage = async (req, res) => {
   }
 };
 
-
+/* ============================
+   PREVIEW PDF (first 2 pages)
+============================= */
+/* ============================
+   PREVIEW PDF STREAM (FULL PDF)
+   - Frontend limits pages
+============================= */
 export const getNotePreviewPdf = async (req, res) => {
   try {
     const noteId = Number(req.params.id);
 
-    // Fetch metadata
-    const { data: note, error } = await supabase
+    if (!noteId || Number.isNaN(noteId)) {
+      return res.status(400).json({ error: "Invalid note id" });
+    }
+
+    const { data: note, error: fetchErr } = await supabase
       .from("notes")
       .select("id, title, file_url")
       .eq("id", noteId)
-      .single();
+      .maybeSingle();
 
-    if (error || !note) {
+    if (fetchErr) {
+      console.error("[Preview] Fetch error:", fetchErr);
+      return res.status(500).json({ error: "DB error" });
+    }
+
+    if (!note) {
       return res.status(404).json({ error: "Note not found" });
     }
 
+    if (!note.file_url) {
+      return res.status(404).json({ error: "File not found" });
+    }
+
     // Download original PDF
-    let buffer;
+    let originalBuffer;
     try {
       const response = await axios.get(note.file_url, {
         responseType: "arraybuffer",
+        timeout: 15000,
       });
-      buffer = Buffer.from(response.data);
+      originalBuffer = Buffer.from(response.data);
     } catch (err) {
-      console.error("PDF download failed:", err);
-      return res.status(500).json({ error: "Failed to load PDF" });
+      console.error("[Preview] PDF download failed:", err?.message);
+      return res.status(502).json({ error: "Failed to retrieve PDF file" });
     }
 
-    // Create 2-page preview
-    const previewPdf = await createPreviewPdf(buffer, 2);
+    // Load original PDF
+    const originalPdf = await PDFDocument.load(originalBuffer);
+    const totalPages = originalPdf.getPageCount();
 
-    if (!previewPdf) {
-      return res.status(500).json({ error: "Failed to create preview" });
-    }
+    // Create preview PDF (2 pages max)
+    const previewPdf = await PDFDocument.create();
 
-    // Send PDF file to browser
+    const pagesToCopy = Math.min(2, totalPages);
+    const pageIndices = Array.from({ length: pagesToCopy }, (_, i) => i);
+
+    const copiedPages = await previewPdf.copyPages(originalPdf, pageIndices);
+    copiedPages.forEach((p) => previewPdf.addPage(p));
+
+    const previewBytes = await previewPdf.save();
+
+    // Headers
     res.set({
       "Content-Type": "application/pdf",
-      "Content-Length": previewPdf.length
+      "Content-Disposition": `inline; filename="${sanitizeFilename(
+        note.title
+      )}_preview.pdf"`,
+      "Cache-Control": "no-store",
+      "Accept-Ranges": "bytes",
+      "Content-Length": previewBytes.length,
     });
 
-    return res.send(previewPdf);
+    return res.send(Buffer.from(previewBytes));
 
   } catch (err) {
-    console.error("getNotePreviewPdf error:", err);
-    res.status(500).json({ error: "Server error" });
+    console.error("[Preview] Unexpected server error:", err);
+    return res.status(500).json({
+      error: "Server error previewing PDF",
+    });
   }
 };
+
+
+
+
+
+
+/* --------------------------------------------
+   Helper: sanitize filename
+--------------------------------------------- */
+function sanitizeFilename(name) {
+  return name.replace(/[<>:"/\\|?*]+/g, "").trim();
+}
+
+/* ============================
+   Helper: createPreviewPdf
+============================= */
+async function createPreviewPdf(originalBuffer, pageCount = 2) {
+  try {
+    const originalPdf = await PDFDocument.load(originalBuffer);
+    const totalPages = originalPdf.getPageCount();
+
+    const previewPdf = await PDFDocument.create();
+
+    const pagesToCopy = Math.min(pageCount, totalPages);
+    const pageIndices = Array.from({ length: pagesToCopy }, (_, i) => i);
+
+    const copiedPages = await previewPdf.copyPages(originalPdf, pageIndices);
+    copiedPages.forEach((p) => previewPdf.addPage(p));
+
+    const pdfBytes = await previewPdf.save();
+    return pdfBytes;
+  } catch (err) {
+    console.error("createPreviewPdf error:", err);
+    return null;
+  }
+}

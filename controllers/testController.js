@@ -65,11 +65,17 @@ export const startTest = async (req, res) => {
     }
 
     // 6. Increment participants only if first attempt
-    if (!priorAttempt) {
-      await supabase.rpc("increment_participants", {
-        test_id_input: Number(test_id),
-      }).catch(console.warn);
-    }
+  // 6. Increment participants only if first attempt
+if (!priorAttempt) {
+  const { error: incErr } = await supabase.rpc("increment_participants", {
+    test_id_input: Number(test_id),
+  });
+
+  if (incErr) {
+    console.warn("increment_participants error:", incErr.message);
+  }
+}
+
 
     return res.json({ attempt });
 

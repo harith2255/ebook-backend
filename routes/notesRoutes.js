@@ -42,7 +42,8 @@ router.post(
   drmCheck,
   incrementDownloads
 );
-
+// routes/notes.js
+router.get("/:id/preview-pdf", getNotePreviewPdf);
 // Get note details + DRM
 router.get("/:id", verifySupabaseAuth.optional, getNoteById);
 
@@ -54,8 +55,7 @@ router.delete(
   verifySupabaseAuth.required,
   deleteNoteHighlight
 );
-// routes/notes.js
-router.get("/:id/preview", getNotePreviewPdf);
+
 
 // Last page tracking
 router.get("/lastpage/:id", verifySupabaseAuth.required, getNoteLastPage);

@@ -21,7 +21,9 @@ export const listCustomers = async (req, res) => {
     // ⚠ MUST use admin client
     let query = supabaseAdmin.from("v_customers").select("*", { count: "exact" });
 
-    if (status) query = query.eq("status", status);
+   if (status) query = query.eq("account_status", status);
+
+
     if (plan) query = query.eq("plan", plan);
 
     if (search) {

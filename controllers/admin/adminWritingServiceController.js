@@ -166,51 +166,45 @@ export const rejectOrder = async (req, res) => {
 /* ===============================
    ADMIN FILE UPLOAD CONTROLLER
 =============================== */
-import multer from "multer";
-const upload = multer({ storage: multer.memoryStorage() }).single("file");
+
 
 export const uploadWritingFile = async (req, res) => {
-  upload(req, res, async (err) => {
-    try {
-      if (err) {
-        console.error("Multer error:", err);
-        return res.status(400).json({ error: "File upload failed" });
-      }
+  try {
+    // Multer already parsed file in router
+    const file = req.file;
 
-      if (!req.file) {
-        return res.status(400).json({ error: "No file provided" });
-      }
-
-      const file = req.file;
-      const fileName = `${Date.now()}-${file.originalname}`;
-
-      // Upload to Supabase Storage
-      const { error: uploadError } = await supabase.storage
-        .from("writing_uploads") // make sure this bucket exists
-        .upload(fileName, file.buffer, {
-          contentType: file.mimetype,
-          upsert: false,
-        });
-
-      if (uploadError) {
-        console.error("Supabase upload error:", uploadError.message);
-        return res.status(500).json({ error: "Supabase upload failed" });
-      }
-
-      // Generate public URL
-      const { data: publicUrl } = supabase.storage
-        .from("writing_uploads")
-        .getPublicUrl(fileName);
-
-      res.json({
-        message: "File uploaded successfully",
-        url: publicUrl.publicUrl,
-      });
-    } catch (error) {
-      console.error("Upload controller error:", error.message);
-      res.status(500).json({ error: "Internal server error" });
+    if (!file) {
+      return res.status(400).json({ error: "No file provided" });
     }
-  });
+
+    const fileName = `${Date.now()}-${file.originalname}`;
+
+    // Upload to Supabase Storage
+    const { error: uploadError } = await supabase.storage
+      .from("writing_uploads") // bucket name
+      .upload(fileName, file.buffer, {
+        contentType: file.mimetype,
+        upsert: false,
+      });
+
+    if (uploadError) {
+      console.error("Supabase upload error:", uploadError.message);
+      return res.status(500).json({ error: "Supabase upload failed" });
+    }
+
+    // Generate public URL
+    const { data: publicUrl } = supabase.storage
+      .from("writing_uploads")
+      .getPublicUrl(fileName);
+
+    return res.json({
+      message: "File uploaded successfully",
+      url: publicUrl.publicUrl,
+    });
+  } catch (error) {
+    console.error("Upload controller error:", error.message);
+    return res.status(500).json({ error: "Internal server error" });
+  }
 };
 
 export const adminReply = async (req, res) => {

@@ -308,8 +308,6 @@ export const deleteContent = async (req, res) => {
   try {
     const { type, id } = req.params;
 
-    console.log("🔥 DELETE REQUEST:", { type, id });
-
     const table =
       type === "book" || type === "ebook" ? "ebooks" :
       type === "note" ? "notes" :
@@ -319,31 +317,33 @@ export const deleteContent = async (req, res) => {
     if (!table)
       return res.status(400).json({ error: "Invalid type" });
 
-    console.log("📌 Resolved table:", table);
+    if (table === "ebooks") {
 
-    /* ==================== CASCADE DELETE ==================== */
-    if (table === "mock_tests") {
-      console.log("🧹 Deleting attempts for test:", id);
-
-      const { error: attemptsErr } = await supabase
-        .from("mock_attempts")
+      // Delete from collections
+      await supabase.from("collection_books")
         .delete()
-        .eq("test_id", id);
+        .eq("book_id", id);
 
-      if (attemptsErr)
-        return res.status(400).json({ error: "Failed to delete attempts" });
+      // Delete from user library
+      await supabase.from("user_library")
+        .delete()
+        .eq("book_id", id);
+
+      // Delete highlights
+      await supabase.from("highlights")
+        .delete()
+        .eq("book_id", id);
     }
 
-    /* ==================== DELETE CONTENT ==================== */
     const { error, count } = await supabase
       .from(table)
       .delete({ count: "exact" })
       .eq("id", id);
 
-    if (error)
-      return res.status(400).json({ error: "Failed to delete content" });
-
-    console.log("✔️ Delete completed, count:", count);
+    if (error) {
+      console.error("Supabase delete error:", error);
+      return res.status(400).json({ error: error.message });
+    }
 
     return res.json({
       message: "Content deleted",
@@ -355,6 +355,7 @@ export const deleteContent = async (req, res) => {
     return res.status(500).json({ error: "Server error deleting content" });
   }
 };
+
 
 
 /* ============================================================================

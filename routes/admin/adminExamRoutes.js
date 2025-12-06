@@ -15,6 +15,9 @@ import {
   uploadUnified,
   deleteSubject,
   updateExam,
+  uploadMultipleExams,
+  uploadMultipleNotes,
+  deleteExamFile,deleteNote
 } from "../../controllers/admin/adminExamController.js";
 
 import {
@@ -24,7 +27,14 @@ import {
 
 const upload = multer({ storage: multer.memoryStorage() });
 
+
+// multi-file upload (up to 20)
+const uploadMulti = multer({
+  storage: multer.memoryStorage(),
+}).array("files", 20);
+
 const router = express.Router();
+
 
 /* -------------------------------------------------------------------------- */
 /*                               ADMIN ROUTES                                 */
@@ -103,6 +113,41 @@ router.post(
   adminOnly,
   gradeSubmission
 );
+// POST: upload multiple notes to existing subject
+/* MULTI UPLOAD NOTES */
+router.post(
+  "/notes/upload-multiple",
+  verifySupabaseAuth.required,
+  adminOnly,
+  uploadMulti,
+  uploadMultipleNotes
+);
+
+/* MULTI UPLOAD EXAMS */
+router.post(
+  "/exams/upload-multiple",
+  verifySupabaseAuth.required,
+  adminOnly,
+  uploadMulti,
+  uploadMultipleExams
+);
+// DELETE NOTE
+router.delete(
+  "/notes/:id",
+  verifySupabaseAuth.required,
+  adminOnly,
+  deleteNote
+);
+
+// DELETE EXAM FILE
+router.delete(
+  "/exams/:id",
+  verifySupabaseAuth.required,
+  adminOnly,
+  deleteExamFile
+);
+
+
 
 /* 🔹 UPDATE EXAM */
 router.put("/:id", verifySupabaseAuth.required, adminOnly, updateExam);

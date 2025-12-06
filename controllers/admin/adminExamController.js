@@ -581,3 +581,154 @@ export async function gradeSubmission(req, res) {
     return res.status(500).json({ error: err.message });
   }
 }
+// POST /api/admin/exams/notes/upload-multiple
+export async function uploadMultipleNotes(req, res) {
+  try {
+    const { subject_id } = req.body;
+    if (!subject_id) return res.status(400).json({ error: "subject_id required" });
+
+    if (!req.files || req.files.length === 0)
+      return res.status(400).json({ error: "No files uploaded" });
+
+    const files = req.files;
+    const uploaded = [];
+
+    for (const file of files) {
+      const filename = `${uuid()}-${file.originalname}`;
+      const path = `study_notes/${filename}`;
+
+      await supabase.storage
+        .from(NOTES_BUCKET)
+        .upload(path, file.buffer, {
+          contentType: file.mimetype,
+        });
+
+      const { data, error } = await supabase
+        .from("study_notes")
+        .insert({
+          subject_id,
+          title: file.originalname,
+          file_name: file.originalname,
+          file_path: path,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      uploaded.push(data);
+    }
+
+    return res.json({ success: true, notes: uploaded });
+  } catch (err) {
+    console.error("uploadMultipleNotes:", err);
+    res.status(500).json({ error: err.message });
+  }
+}
+// POST /api/admin/exams/upload-multiple
+export async function uploadMultipleExams(req, res) {
+  try {
+    const { subject_id } = req.body;
+    if (!subject_id) return res.status(400).json({ error: "subject_id required" });
+
+    if (!req.files || req.files.length === 0)
+      return res.status(400).json({ error: "No files uploaded" });
+
+    const files = req.files;
+    const uploaded = [];
+
+    for (const file of files) {
+      const filename = `${uuid()}-${file.originalname}`;
+      const path = `exams/${filename}`;
+
+      await supabase.storage
+        .from(EXAMS_BUCKET)
+        .upload(path, file.buffer, {
+          contentType: file.mimetype,
+        });
+
+      const { data, error } = await supabase
+        .from("exams")
+        .insert({
+          subject_id,
+          title: file.originalname,
+          file_name: file.originalname,
+          file_path: path,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      uploaded.push(data);
+    }
+
+    return res.json({ success: true, exams: uploaded });
+  } catch (err) {
+    console.error("uploadMultipleExams:", err);
+    res.status(500).json({ error: err.message });
+  }
+}
+// DELETE: /api/admin/exams/notes/:id
+export async function deleteNote(req, res) {
+  try {
+    const noteId = Number(req.params.id);
+
+    // fetch record
+    const { data: note, error: err1 } = await supabase
+      .from("study_notes")
+      .select("*")
+      .eq("id", noteId)
+      .single();
+
+    if (err1 || !note) return res.status(404).json({ error: "Note not found" });
+
+    // remove from storage
+    await supabase.storage
+      .from(NOTES_BUCKET)
+      .remove([note.file_path]);
+
+    // delete DB record
+    await supabase
+      .from("study_notes")
+      .delete()
+      .eq("id", noteId);
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("deleteNote:", err);
+    res.status(500).json({ error: err.message });
+  }
+}
+// DELETE: /api/admin/exams/exams/:id
+export async function deleteExamFile(req, res) {
+  try {
+    const examId = Number(req.params.id);
+
+    const { data: exam } = await supabase
+      .from("exams")
+      .select("*")
+      .eq("id", examId)
+      .single();
+
+    if (!exam) return res.status(404).json({ error: "Exam not found" });
+
+    // remove from storage
+    if (exam.file_path) {
+      await supabase.storage
+        .from(EXAMS_BUCKET)
+        .remove([exam.file_path]);
+    }
+
+    // delete DB record
+    await supabase
+      .from("exams")
+      .delete()
+      .eq("id", examId);
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("deleteExamFile:", err);
+    res.status(500).json({ error: err.message });
+  }
+}

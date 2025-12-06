@@ -25,6 +25,7 @@ import {
   saveStudySession,
   updateCollection,
   getCollectionBookIds,
+  resetReading,
 } from "../controllers/libraryController.js";
 
 const router = express.Router();
@@ -44,6 +45,10 @@ router.put("/progress/:bookId", updateReadingProgress);
 router.post("/read/start", startReading);
 router.put("/complete/:bookId", markBookCompleted);
 router.post("/study-session", saveStudySession);
+router.put(
+  "/reset/:bookId",
+  resetReading
+);
 
 // ----- 📄 Last Page Routes -----
 router.get("/lastpage/:bookId", getLastPage);
