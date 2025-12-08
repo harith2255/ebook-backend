@@ -17,7 +17,8 @@ import {
   updateExam,
   uploadMultipleExams,
   uploadMultipleNotes,
-  deleteExamFile,deleteNote
+  deleteExamFile,deleteNote,
+  createSubject,
 } from "../../controllers/admin/adminExamController.js";
 
 import {
@@ -39,6 +40,7 @@ const router = express.Router();
 /* -------------------------------------------------------------------------- */
 /*                               ADMIN ROUTES                                 */
 /* -------------------------------------------------------------------------- */
+router.post("/subject", verifySupabaseAuth.required,adminOnly, createSubject);
 
 /* 🔹 LIST SUBJECTS — MUST BE ABOVE "/" ROUTE */
 router.get("/subjects", verifySupabaseAuth.required, adminOnly, listSubjects);

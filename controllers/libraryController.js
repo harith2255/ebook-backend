@@ -4,35 +4,81 @@ import supabase from "../utils/supabaseClient.js";
    📘 GET ALL BOOKS IN USER LIBRARY
 ============================================ */
 export const getUserLibrary = async (req, res) => {
-  const userId = req.user.id;
+  try {
+    const userId = req.user?.id;
 
-  const { data, error } = await supabase
-    .from("user_library")
-    .select(`
-      id,
-      progress,
-      last_page,
-      added_at,
-      book_id,
-      ebooks (
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    // STEP 1: Purchased books + ebook data
+    const { data: purchases, error } = await supabase
+      .from("book_sales")
+      .select(`
         id,
-        title,
-        author,
-        category,
-        description,
-        cover_url,
-        file_url,
-        pages,
-        price,
-        sales
-      )
-    `)
-    .eq("user_id", userId)
-    .order("added_at", { ascending: false });
+        book_id,
+        purchased_at,
+        ebooks!fk_book_sales_book (
+          id,
+          title,
+          author,
+          category,
+          cover_url,
+          pages
+        )
+      `)
+      .eq("user_id", userId)
+      .order("purchased_at", { ascending: false });
 
-  if (error) return res.status(400).json({ error: error.message });
-  res.json(data);
+    if (error) throw error;
+
+    if (!purchases || purchases.length === 0) {
+      return res.json([]);
+    }
+
+    // STEP 2: Progress
+    const bookIds = purchases.map(p => p.book_id);
+
+    const { data: libraryRows } = await supabase
+      .from("user_library")
+      .select("book_id, progress, last_page")
+      .in("book_id", bookIds)
+      .eq("user_id", userId);
+
+    const libraryMap = new Map();
+    (libraryRows || []).forEach(r => libraryMap.set(r.book_id, r));
+
+    // STEP 3: Final normalized response
+    const formatted = purchases.map(row => {
+      const ebook = row.ebooks || {};
+      const lib = libraryMap.get(row.book_id) || {};
+
+      return {
+        book_id: row.book_id,
+
+        ebooks: {
+          id: ebook.id,
+          title: ebook.title,
+          author: ebook.author,
+          category: ebook.category,
+          cover_url: ebook.cover_url || "https://placehold.co/300x400",
+          pages: ebook.pages || 0,
+        },
+
+        progress: Number(lib.progress ?? 0),
+        added_at: row.purchased_at || null,
+      };
+    });
+
+    return res.json(formatted);
+
+  } catch (err) {
+    console.error("getUserLibrary error:", err);
+    return res.status(500).json({ error: "Failed to load library" });
+  }
 };
+
+
 
 
 /* ============================================
@@ -99,7 +145,7 @@ export const getRecentBooks = async (req, res) => {
       id,
       progress,
       added_at,
-      ebooks (
+      ebooks!fk_user_library_ebooks (
         id,
         title,
         author,
@@ -132,7 +178,7 @@ export const getCurrentlyReading = async (req, res) => {
       id,
       progress,
       added_at,
-      ebooks (
+      ebooks!fk_user_library_ebooks (
         id,
         title,
         author,
@@ -165,7 +211,7 @@ export const getCompletedBooks = async (req, res) => {
       id,
       progress,
       added_at,
-      ebooks (
+      ebooks!fk_user_library_ebooks (
         id,
         title,
         author,
@@ -199,7 +245,7 @@ export const searchLibrary = async (req, res) => {
         id,
         progress,
         added_at,
-        ebooks (
+        ebooks!fk_user_library_ebooks (
           id,
           title,
           author,
@@ -258,56 +304,63 @@ export const getCollectionBooks = async (req, res) => {
   try {
     const collectionId = req.params.id;
 
-    const { data, error } = await supabase
+    // 1) Get book_ids from collection
+    const { data: rows, error } = await supabase
       .from("collection_books")
-      .select(`
-        book_id,
-        ebooks (
-          id,
-          title,
-          author,
-          category,
-          cover_url,
-          pages
-        )
-      `)
+      .select("book_id")
       .eq("collection_id", collectionId);
 
     if (error) throw error;
+    if (!rows || rows.length === 0) return res.json([]);
 
-    const books = (data || [])
-      .filter((entry) => entry.ebooks !== null)
-      .map((entry) => ({
-        id: entry.ebooks.id,
-        title: entry.ebooks.title,
-        author: entry.ebooks.author,
-        category: entry.ebooks.category,
-        cover_url: entry.ebooks.cover_url || "https://placehold.co/300x400",
-        pages: entry.ebooks.pages,
-      }));
+    // 2) Extract book ids
+    const ids = rows.map(r => r.book_id);
 
-    res.json(books);
+    // 3) Fetch ebook details
+    const { data: books, error: booksErr } = await supabase
+      .from("ebooks")
+      .select("id, title, author, category, cover_url, pages")
+      .in("id", ids);
+
+    if (booksErr) throw booksErr;
+
+    // 4) Format + fallback cover
+    const formatted = books.map(b => ({
+      id: b.id,
+      title: b.title,
+      author: b.author,
+      category: b.category,
+      cover_url: b.cover_url || "https://placehold.co/300x400",
+      pages: b.pages
+    }));
+
+    return res.json(formatted);
+
   } catch (err) {
     console.error("ERROR getCollectionBooks:", err);
     res.status(500).json({ error: "Failed to fetch collection books" });
   }
 };
 
+
 export const addBookToCollection = async (req, res) => {
   try {
     const collectionId = req.params.id;
-    const { book_id } = req.body;
 
-    if (!book_id) {
+    // accept both formats from frontend
+    const { book_id, id } = req.body;
+    const realBookId = book_id || id;
+
+    if (!realBookId) {
       return res.status(400).json({ error: "book_id is required" });
     }
 
-    // 👉 1️⃣ Check if already exists
+    // 1) Already exists?
     const { data: existing, error: existingErr } = await supabase
       .from("collection_books")
       .select("id")
       .eq("collection_id", collectionId)
-      .eq("book_id", book_id)
+      .eq("book_id", realBookId)
       .maybeSingle();
 
     if (existingErr) throw existingErr;
@@ -319,20 +372,25 @@ export const addBookToCollection = async (req, res) => {
       });
     }
 
-    // 👉 2️⃣ Insert only if not exists
+    // 2) Insert
     const { error } = await supabase.from("collection_books").insert({
       collection_id: collectionId,
-      book_id: book_id,
+      book_id: realBookId,
     });
 
     if (error) throw error;
 
-    res.json({ message: "Book added to collection", alreadyAdded: false });
+    return res.json({
+      message: "Book added to collection",
+      alreadyAdded: false,
+    });
+
   } catch (err) {
     console.error("ADD BOOK TO COLLECTION ERROR:", err);
-    res.status(500).json({ error: "Failed to add book" });
+    return res.status(500).json({ error: "Failed to add book" });
   }
 };
+
 
 export const deleteCollection = async (req, res) => {
   try {
@@ -395,43 +453,19 @@ export const updateReadingProgress = async (req, res) => {
     const { bookId } = req.params;
     let { progress, last_page } = req.body;
 
-    console.log("📥 UPDATE REQUEST RAW INPUT:", {
-      params: req.params,
-      body: req.body,
-      userId,
-    });
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    if (!bookId) return res.status(400).json({ error: "Missing bookId param" });
 
-    // check missing values
-    if (!userId) {
-      console.error("❌ No userId in req.user");
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-
-    if (!bookId) {
-      console.error("❌ No bookId in params");
-      return res.status(400).json({ error: "Missing bookId param" });
-    }
-
-    // parse numbers safely
     progress = Number(progress);
     last_page = Number(last_page);
 
-    if (isNaN(progress) || isNaN(last_page)) {
-      console.error("❌ Invalid numeric input", { progress, last_page });
+    if (isNaN(progress) || isNaN(last_page))
       return res.status(400).json({ error: "Invalid numeric values" });
-    }
 
     const safeProgress = Math.min(100, Math.max(0, Math.round(progress)));
     const now = new Date().toISOString();
 
-    console.log("📤 DB UPDATE PAYLOAD:", {
-      bookId,
-      userId,
-      progress: safeProgress,
-      last_page,
-      completed_at: safeProgress === 100 ? now : null,
-    });
-
+    // 1) Try update
     const { data, error } = await supabase
       .from("user_library")
       .update({
@@ -441,24 +475,39 @@ export const updateReadingProgress = async (req, res) => {
       })
       .eq("user_id", userId)
       .eq("book_id", bookId)
-      .select("*");  // force select so we can see result
+      .select("*");
 
-    console.log("📥 DB RESULT:", { data, error });
+    // DB error
+    if (error) return res.status(400).json({ error: error.message });
 
-    // supabase returned an error
-    if (error) {
-      console.error("❌ DB ERROR:", error);
-      return res.status(400).json({ error: error.message });
-    }
-
-    // supabase returned no matching rows
+    // 2) If no row updated → insert new record
     if (!data || data.length === 0) {
-      console.error("❌ No row updated — possible RLS block or bad bookId");
-      return res.status(404).json({
-        error: "Progress update failed, record not found",
+      console.warn("⚠️ No matching row — inserting new record");
+
+      const insertPayload = {
+        user_id: userId,
+        book_id: bookId,
+        progress: safeProgress,
+        last_page,
+        completed_at: safeProgress === 100 ? now : null,
+      };
+
+      const { data: newRow, error: insertErr } = await supabase
+        .from("user_library")
+        .insert([insertPayload])
+        .select("*");
+
+      if (insertErr) {
+        return res.status(400).json({ error: insertErr.message });
+      }
+
+      return res.json({
+        success: true,
+        data: newRow[0],
       });
     }
 
+    // 3) return updated record
     return res.json({
       success: true,
       data: data[0],
@@ -469,6 +518,7 @@ export const updateReadingProgress = async (req, res) => {
     return res.status(500).json({ error: "Server error updating progress" });
   }
 };
+
 
 
 

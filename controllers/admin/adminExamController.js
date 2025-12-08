@@ -732,3 +732,20 @@ export async function deleteExamFile(req, res) {
     res.status(500).json({ error: err.message });
   }
 }
+// POST /api/admin/exams/subject
+export async function createSubject(req, res) {
+  try {
+    const { label, value } = req.body;
+
+    if (!label || !value) {
+      return res.status(400).json({ error: "label & value required" });
+    }
+
+    const subject = await findOrCreateSubject(label, value);
+
+    return res.json({ success: true, subject });
+  } catch (err) {
+    console.error("createSubject:", err);
+    return res.status(500).json({ error: err.message });
+  }
+}
