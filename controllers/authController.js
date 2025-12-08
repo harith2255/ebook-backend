@@ -62,8 +62,9 @@ export async function register(req, res) {
   }
 }
 
+
 /* =====================================================
-   🧠 LOGIN USER  +  DRM LOGGING ADDED HERE
+   🧠 LOGIN USER  +  DRM LOGGING  +  SUSPENSION CHECK
 ===================================================== */
 export async function login(req, res) {
   try {
@@ -82,66 +83,76 @@ export async function login(req, res) {
     const accessToken = loginData.session?.access_token;
 
     // Fetch profile
-    const { data: profile } = await supabase
+    const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("full_name, first_name, last_name, role, email")
+      .select("status, full_name, first_name, last_name, role, email")
       .eq("id", userId)
       .single();
 
+    if (profileError)
+      return res.status(400).json({ error: profileError.message });
+
+    /* ==========================================================
+       🚫 BLOCK SUSPENDED USERS
+    =========================================================== */
+    if (profile?.status?.toLowerCase() === "suspended") {
+      // Kill session immediately
+      await supabase.auth.signOut();
+
+      return res.status(403).json({
+        error: "Your account has been suspended. Contact support."
+      });
+    }
+
     let role = profile?.role || "User";
 
-    // Super admin override
-   if (email === process.env.SUPER_ADMIN_EMAIL) {
-  role = "super_admin";
+    /* ==========================================================
+       👑 SUPER ADMIN OVERRIDE
+    =========================================================== */
+    if (email === process.env.SUPER_ADMIN_EMAIL) {
+      role = "super_admin";
 
-  // Add role to JWT claims (app_metadata)
-  const { error: metadataError } = await supabase.auth.admin.updateUserById(userId, {
-    app_metadata: { role: "super_admin" }
-  });
+      const { error: metadataError } =
+        await supabase.auth.admin.updateUserById(userId, {
+          app_metadata: { role: "super_admin" },
+        });
 
-  if (metadataError) {
-    console.error("Metadata update error:", metadataError);
-  }
+      if (metadataError) console.error("Metadata update error:", metadataError);
 
-  // Keep profiles table in sync
-  await supabase.from("profiles").upsert([{ id: userId, role }]);
-}
-
-
+      await supabase.from("profiles").upsert([{ id: userId, role }]);
+    }
 
     const fullName =
       profile?.full_name ||
       `${profile?.first_name || ""} ${profile?.last_name || ""}`.trim() ||
       email;
 
-    // NORMAL USER ACTIVITY
+    // Log activity only for user (not admin)
     if (role === "User") {
       await logActivity(userId, fullName, "logged in", "login");
     }
 
     /* ==========================================================
-       ⭐ NEW: DRM ACCESS LOGGING (LOGIN)
+       ⭐ DRM ACCESS LOGGING (LOGIN)
     =========================================================== */
     await supabase.from("drm_access_logs").insert({
       user_id: userId,
       user_name: fullName,
       action: "login",
-      book_id: null,
-      book_title: null,
       device_info: req.headers["user-agent"],
       ip_address: req.ip,
       created_at: new Date(),
     });
 
-    // Response
-
+    /* ==========================================================
+       RESPONSE
+    =========================================================== */
     return res.status(200).json({
       message: "Login successful",
       user: { id: userId, email, role, full_name: fullName },
 
-      // always provide the correct token fields
       access_token: accessToken,
-      token: accessToken, // universal
+      token: accessToken,
       refresh_token: loginData.session?.refresh_token,
     });
   } catch (err) {
@@ -149,6 +160,7 @@ export async function login(req, res) {
     return res.status(500).json({ error: "Internal Server Error" });
   }
 }
+
 
 /* =====================================================
    🚪 LOGOUT USER + DRM LOGGING ADDED HERE

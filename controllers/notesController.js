@@ -462,15 +462,11 @@ export const getNotePreviewPdf = async (req, res) => {
       return res.status(500).json({ error: "DB error" });
     }
 
-    if (!note) {
-      return res.status(404).json({ error: "Note not found" });
-    }
-
-    if (!note.file_url) {
+    if (!note || !note.file_url) {
       return res.status(404).json({ error: "File not found" });
     }
 
-    // Download original PDF
+    // Download full original PDF
     let originalBuffer;
     try {
       const response = await axios.get(note.file_url, {
@@ -483,33 +479,21 @@ export const getNotePreviewPdf = async (req, res) => {
       return res.status(502).json({ error: "Failed to retrieve PDF file" });
     }
 
-    // Load original PDF
+    // Load original to get page count
     const originalPdf = await PDFDocument.load(originalBuffer);
     const totalPages = originalPdf.getPageCount();
 
-    // Create preview PDF (2 pages max)
-    const previewPdf = await PDFDocument.create();
-
-    const pagesToCopy = Math.min(2, totalPages);
-    const pageIndices = Array.from({ length: pagesToCopy }, (_, i) => i);
-
-    const copiedPages = await previewPdf.copyPages(originalPdf, pageIndices);
-    copiedPages.forEach((p) => previewPdf.addPage(p));
-
-    const previewBytes = await previewPdf.save();
-
-    // Headers
+    // Send PDF + page count header
     res.set({
       "Content-Type": "application/pdf",
       "Content-Disposition": `inline; filename="${sanitizeFilename(
         note.title
       )}_preview.pdf"`,
       "Cache-Control": "no-store",
-      "Accept-Ranges": "bytes",
-      "Content-Length": previewBytes.length,
+      "X-Total-Pages": String(totalPages),
     });
 
-    return res.send(Buffer.from(previewBytes));
+    return res.send(originalBuffer);
 
   } catch (err) {
     console.error("[Preview] Unexpected server error:", err);
@@ -518,6 +502,7 @@ export const getNotePreviewPdf = async (req, res) => {
     });
   }
 };
+
 
 
 

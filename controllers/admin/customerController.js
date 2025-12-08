@@ -59,22 +59,25 @@ export const suspendCustomer = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // 1. Update profile
+    // Update real column
     const { error: profileError } = await supabaseAdmin
       .from("profiles")
-      .update({ status: "Suspended" })
+      .update({ status: "suspended" })
       .eq("id", id);
 
-    if (profileError)
+    if (profileError) {
       return res.status(400).json({ error: profileError.message });
+    }
 
-    // 2. Ban user
+    // Block login + revoke sessions
     const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(id, {
-      ban_until: "9999-12-31T23:59:59Z"
+      ban_until: "9999-12-31T23:59:59Z",
+      revoke_tokens: true,
     });
 
-    if (authError)
+    if (authError) {
       return res.status(400).json({ error: authError.message });
+    }
 
     res.json({ message: "Customer suspended successfully" });
   } catch (err) {
@@ -85,6 +88,7 @@ export const suspendCustomer = async (req, res) => {
 
 
 
+
 /* ---------------------------------------------------------
    ACTIVATE USER
 --------------------------------------------------------- */
@@ -92,13 +96,18 @@ export const activateCustomer = async (req, res) => {
   try {
     const { id } = req.params;
 
-    await supabaseAdmin
+    const { error: profileError } = await supabaseAdmin
       .from("profiles")
-      .update({ status: "Active" })
+      .update({ status: "active" })
       .eq("id", id);
 
+    if (profileError) {
+      return res.status(400).json({ error: profileError.message });
+    }
+
     await supabaseAdmin.auth.admin.updateUserById(id, {
-      ban_until: null
+      ban_until: null,
+      revoke_tokens: true,
     });
 
     res.json({ message: "Customer activated successfully" });
@@ -107,6 +116,8 @@ export const activateCustomer = async (req, res) => {
     res.status(500).json({ error: "Server error activating customer" });
   }
 };
+
+
 
 
 
