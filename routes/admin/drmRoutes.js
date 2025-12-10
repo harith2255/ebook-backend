@@ -2,11 +2,13 @@ import express from "express";
 import {
   getDRMSettings,
   updateDRMSettings,
-  getAccessLogs,
   addWatermark,
   getActiveLicenses,
   revokeAccess,
   downloadAccessReport,
+  getAccessLogs,
+  logAccessEvent,
+
 } from "../../controllers/admin/drmController.js";
 
 import {
@@ -26,17 +28,17 @@ router.put(
   adminOnly,
   updateDRMSettings
 );
-
-// ----------------------------------------------------------
-//  ACCESS LOGS
-// ----------------------------------------------------------
-router.get(
-  "/access-logs",
+router.post(
+  "/log",
   verifySupabaseAuth.required,
   adminOnly,
-  getAccessLogs
+  logAccessEvent
 );
 
+/* ------------------------------
+   ACCESS LOGS (ADMIN ONLY)
+--------------------------------*/
+router.get("/access-logs", verifySupabaseAuth.required, adminOnly, getAccessLogs);
 // ----------------------------------------------------------
 //  QUICK ACTIONS
 // ----------------------------------------------------------

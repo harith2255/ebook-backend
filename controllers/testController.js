@@ -90,24 +90,75 @@ if (!priorAttempt) {
 /* ==========================================================
    GET QUESTIONS
 ========================================================== */
+/* ==========================================================
+   GET QUESTIONS (dynamic options + explanation)
+========================================================== */
 export const getQuestions = async (req, res) => {
   try {
     const { test_id } = req.params;
 
+    console.log("📌 Incoming Test ID:", test_id);
+
     const { data, error } = await supabase
       .from("mock_test_questions")
-      .select("id, question, option_a, option_b, option_c, option_d, correct_option")
+      .select(`
+        id,
+        question,
+        option_a,
+        option_b,
+        option_c,
+        option_d,
+        option_e,
+        correct_option,
+        explanation
+      `)
       .eq("test_id", test_id)
       .order("id");
 
-    if (error) return res.status(400).json({ error: error.message });
+    console.log("📥 Raw DB Data:", data);
+    console.log("⚠️ DB Error:", error);
 
-    return res.json(data || []);
+    if (error) {
+      console.error("❌ Supabase error in getQuestions:", error);
+      return res.status(400).json({ error: error.message });
+    }
+
+    if (!data || data.length === 0) {
+      console.warn("⚠️ No questions found for test:", test_id);
+      return res.json({ mock_test_questions: [] });
+    }
+
+    const formatted = data.map((q) => {
+      console.log("➡️ Processing Question:", q.id, "Explanation:", q.explanation);
+
+      return {
+        id: q.id,
+        question: q.question,
+        options: [
+          q.option_a,
+          q.option_b,
+          q.option_c,
+          q.option_d,
+          q.option_e
+        ].filter(Boolean),
+        correct_option: q.correct_option,
+        explanation: q.explanation || ""   // add fallback
+      };
+    });
+
+    console.log("📤 Final formatted questions:", formatted);
+
+    return res.json({
+      mock_test_questions: formatted,
+    });
+
   } catch (err) {
-    console.error("❌ getQuestions error", err);
+    console.error("🔥 CRITICAL getQuestions ERROR:", err);
     return res.status(500).json({ error: err.message });
   }
 };
+
+
 
 /* ==========================================================
    SAVE ANSWER (Upsert + progress update)

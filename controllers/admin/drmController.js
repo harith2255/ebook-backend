@@ -1,51 +1,37 @@
 import supabase from "../../utils/supabaseClient.js";
 
 /* ======================================================
-   ✅ GET DRM SETTINGS (ONE ROW)
+   GET DRM SETTINGS
 ====================================================== */
 export const getDRMSettings = async (req, res) => {
   try {
     const { data, error } = await supabase
       .from("drm_settings")
       .select("*")
-      .eq("id", 1)      // one settings record
+      .eq("id", 1)
       .single();
 
     if (error) return res.status(400).json({ error: error.message });
 
-    return res.json({
-      settings: {
-        copy_protection: data.copy_protection,
-        watermarking: data.watermarking,
-        device_limit: data.device_limit,
-        screenshot_prevention: data.screenshot_prevention,
-      },
-    });
+    return res.json({ settings: data });
   } catch (err) {
     console.error("getDRMSettings error:", err);
-    return res.status(500).json({ error: "Server error fetching DRM settings" });
+    return res.status(500).json({ error: "Failed to fetch settings" });
   }
 };
 
-
-
 /* ======================================================
-   ✅ UPDATE DRM SETTINGS
+   UPDATE DRM SETTINGS
 ====================================================== */
 export const updateDRMSettings = async (req, res) => {
   try {
     const { settings } = req.body;
-
-    if (!settings)
-      return res.status(400).json({ error: "Missing settings payload" });
+    if (!settings) return res.status(400).json({ error: "Missing settings" });
 
     const { data, error } = await supabase
       .from("drm_settings")
       .update({
-        copy_protection: settings.copy_protection,
-        watermarking: settings.watermarking,
-        device_limit: settings.device_limit,
-        screenshot_prevention: settings.screenshot_prevention,
+        ...settings,
         updated_at: new Date(),
       })
       .eq("id", 1)
@@ -54,20 +40,55 @@ export const updateDRMSettings = async (req, res) => {
 
     if (error) return res.status(400).json({ error: error.message });
 
-    return res.json({
-      message: "DRM settings updated successfully",
-      settings: data,
-    });
+    return res.json({ message: "Settings updated", settings: data });
   } catch (err) {
     console.error("updateDRMSettings error:", err);
-    return res.status(500).json({ error: "Failed to update DRM settings" });
+    return res.status(500).json({ error: "Failed to update settings" });
+  }
+};
+export const logAccessEvent = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { book_id, page, device_id } = req.body;
+
+    if (!book_id)
+      return res.status(400).json({ error: "book_id required" });
+
+    // Get user name
+    const { data: user } = await supabase
+      .from("profiles")
+      .select("full_name")
+      .eq("id", userId)
+      .maybeSingle();
+
+    // Get book name
+    const { data: book } = await supabase
+      .from("ebooks")
+      .select("title")
+      .eq("id", book_id)
+      .maybeSingle();
+
+    await supabase.from("drm_access_logs").insert({
+      user_id: userId,
+      user_name: user?.full_name ?? "Unknown",
+      book_id,
+      book_title: book?.title ?? "Unknown Book",
+      action: "read",
+      device_info: device_id ?? req.headers["user-agent"],
+      ip_address: req.ip,
+      created_at: new Date(),
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("logAccessEvent error:", err);
+    res.status(500).json({ error: "Failed to log event" });
   }
 };
 
 
-
 /* ======================================================
-   ✅ GET ACCESS LOGS (Latest 50)
+   GET ACCESS LOGS
 ====================================================== */
 export const getAccessLogs = async (req, res) => {
   try {
@@ -75,31 +96,24 @@ export const getAccessLogs = async (req, res) => {
       .from("drm_access_logs")
       .select("*")
       .order("created_at", { ascending: false })
-      .limit(50);
+      .limit(100);
 
-    if (error) {
-      console.error("getAccessLogs error:", error);
-      return res.status(400).json({ error: error.message });
-    }
+    if (error) return res.status(400).json({ error: error.message });
 
-    return res.json({ logs: data });
+    res.json({ logs: data });
   } catch (err) {
-    console.error("getAccessLogs fatal error:", err);
-    return res.status(500).json({ error: "Failed to load access logs" });
+    res.status(500).json({ error: "Failed to load logs" });
   }
 };
 
-
-
 /* ======================================================
-   ✅ ADD WATERMARK (Queue job)
+   ADD WATERMARK (QUEUE JOB)
 ====================================================== */
 export const addWatermark = async (req, res) => {
   try {
     const { book_id } = req.body;
 
-    if (!book_id)
-      return res.status(400).json({ error: "book_id is required" });
+    if (!book_id) return res.status(400).json({ error: "book_id required" });
 
     await supabase.from("watermark_jobs").insert({
       book_id,
@@ -107,108 +121,74 @@ export const addWatermark = async (req, res) => {
       created_at: new Date(),
     });
 
-    return res.json({
-      message: `Watermark job queued for book ${book_id}`,
-    });
+    return res.json({ message: "Watermark job queued" });
   } catch (err) {
-    console.error("addWatermark error:", err);
-    return res.status(500).json({ error: "Failed to queue watermark job" });
+    return res.status(500).json({ error: "Failed to queue job" });
   }
 };
 
-
-
 /* ======================================================
-   ✅ GET ACTIVE LICENSES (Subscriptions)
+   GET ACTIVE SUBSCRIPTIONS
 ====================================================== */
 export const getActiveLicenses = async (req, res) => {
   try {
     const { data, error } = await supabase
       .from("subscriptions")
-      .select("user_id, plan, status, end_date")
+      .select("*")
       .eq("status", "active");
 
-    if (error) {
-      console.error("getActiveLicenses error:", error);
-      return res.status(400).json({ error: error.message });
-    }
+    if (error) return res.status(400).json({ error: error.message });
 
-    return res.json({ licenses: data });
+    res.json({ licenses: data });
   } catch (err) {
-    console.error("getActiveLicenses fatal error:", err);
-    return res.status(500).json({ error: "Failed to load active licenses" });
+    res.status(500).json({ error: "Failed to load licenses" });
   }
 };
 
-
-
 /* ======================================================
-   ✅ REVOKE USER ACCESS
-   Logs into drm_access_logs
+   REVOKE USER ACCESS
 ====================================================== */
 export const revokeAccess = async (req, res) => {
   try {
     const { userId } = req.body;
 
-    if (!userId)
-      return res.status(400).json({ error: "userId is required" });
+    if (!userId) return res.status(400).json({ error: "userId required" });
 
-    // Update subscription
-    const { error } = await supabase
+    await supabase
       .from("subscriptions")
       .update({ status: "revoked" })
       .eq("user_id", userId);
 
-    if (error) {
-      console.error("revokeAccess error:", error);
-      return res.status(400).json({ error: error.message });
-    }
-
-    // Log revoke
     await supabase.from("drm_access_logs").insert({
       user_id: userId,
-      user_name: "Admin Panel",
-      book_id: null,
-      book_title: null,
-      action: "revoke",
-      device_info: "admin_panel",
-      ip_address: req.ip,
+      action: "revoked",
       created_at: new Date(),
     });
 
-    return res.json({ message: "User access revoked successfully" });
+    return res.json({ message: "User access revoked" });
   } catch (err) {
-    console.error("revokeAccess fatal error:", err);
-    return res.status(500).json({ error: "Server error revoking user access" });
+    return res.status(500).json({ error: "Failed to revoke access" });
   }
 };
 
-
-
 /* ======================================================
-   ✅ DOWNLOAD ACCESS LOG REPORT (CSV)
+   EXPORT CSV REPORT
 ====================================================== */
 export const downloadAccessReport = async (req, res) => {
   try {
-    const { data, error } = await supabase
-      .from("drm_access_logs")
-      .select("*");
+    const { data } = await supabase.from("drm_access_logs").select("*");
 
-    if (error) return res.status(400).json({ error: error.message });
-
-    const csvRows = [
-      "user_name,book_title,action,device_info,ip_address,created_at",
+    const csv = [
+      "user_id,book_title,action,device,ip,created_at",
       ...data.map((r) =>
-        `${r.user_name || ""},${r.book_title || ""},${r.action},${r.device_info},${r.ip_address},${r.created_at}`
+        `${r.user_id},${r.book_title ?? ""},${r.action},${r.device_info},${r.ip},${r.created_at}`
       ),
     ].join("\n");
 
-    res.setHeader("Content-Type", "text/csv");
-    res.setHeader("Content-Disposition", "attachment; filename=drm_report.csv");
-
-    return res.send(csvRows);
+    res.header("Content-Type", "text/csv");
+    res.header("Content-Disposition", "attachment; filename=drm_report.csv");
+    return res.send(csv);
   } catch (err) {
-    console.error("downloadAccessReport error:", err);
-    return res.status(500).json({ error: "Failed to generate report" });
+    return res.status(500).json({ error: "Failed to export report" });
   }
 };

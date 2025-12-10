@@ -210,34 +210,37 @@ export const uploadContent = async (req, res) => {
     }
 
     /* ==================== INSERT MCQs (for Mock Test) ==================== */
-    if (type === "Mock Test" && Array.isArray(mcqs) && mcqs.length > 0) {
-      const testId = insertData.id;
+    /* ==================== INSERT MCQs (for Mock Test) ==================== */
+if (type === "Mock Test" && Array.isArray(mcqs) && mcqs.length > 0) {
+  const testId = insertData.id;
 
-      const questionRows = mcqs.map((mcq) => ({
-        test_id: testId,
-        question: mcq.question || "",
-        option_a: mcq.options?.[0] || "",
-        option_b: mcq.options?.[1] || "",
-        option_c: mcq.options?.[2] || "",
-        option_d: mcq.options?.[3] || "",
-        correct_option: mcq.answer || "",
-      }));
+  const questionRows = mcqs.map((mcq) => ({
+    test_id: testId,
+    question: mcq.question || "",
+    option_a: mcq.options?.[0] || null,
+    option_b: mcq.options?.[1] || null,
+    option_c: mcq.options?.[2] || null,
+    option_d: mcq.options?.[3] || null,
+    option_e: mcq.options?.[4] || null,   // ✅ FIXED (Previously missing)
+    correct_option: mcq.answer || "",
+    explanation: mcq.explanation || null  // ✅ FIXED
+  }));
 
-      const { error: qErr } = await supabase
-        .from("mock_test_questions")
-        .insert(questionRows);
+  const { error: qErr } = await supabase
+    .from("mock_test_questions")
+    .insert(questionRows);
 
-      if (qErr) {
-        console.error("MCQ insert error:", qErr);
-        // Test is created but MCQs failed → you can decide if this should be 400 or 201 with warning
-        return res.status(400).json({
-          error: "Mock test created, but MCQ insert failed",
-          details: qErr.message,
-        });
-      }
+  if (qErr) {
+    console.error("MCQ insert error:", qErr);
+    return res.status(400).json({
+      error: "Mock test created, but MCQ insert failed",
+      details: qErr.message,
+    });
+  }
 
-      console.log(`Inserted ${questionRows.length} MCQs for test ${testId}`);
-    }
+  console.log(`Inserted ${questionRows.length} MCQs for test ${testId}`);
+}
+
 
     /* ==================== SUCCESS RESPONSE ==================== */
     return res.status(201).json({

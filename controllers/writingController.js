@@ -391,3 +391,27 @@ export const getSingleWritingOrder = async (req, res) => {
     return res.status(500).json({ error: "Failed to load order" });
   }
 };
+export const createWritingOrder = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const body = req.body;
+
+    // MUST CHECK: Payment Done?
+    if (!body.payment_success) {
+      return res.status(400).json({ error: "Payment not completed" });
+    }
+
+    const { error } = await supabase.from("writing_orders").insert({
+      user_id: userId,
+      ...body,
+      status: "Pending",
+      created_at: new Date(),
+    });
+
+    res.json({ message: "Order created successfully" });
+
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ error: "Server error" });
+  }
+};

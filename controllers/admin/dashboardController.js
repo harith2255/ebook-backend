@@ -69,8 +69,12 @@ export const getAdminDashboard = async (req, res) => {
       console.error("revenue MTD error:", revMonthErr);
     }
 
-    const revenueMTD =
-      revenueMonth?.reduce((sum, r) => sum + Number(r.amount), 0) || 0;
+    const revenueMTD = Number(
+  (
+    revenueMonth?.reduce((sum, r) => sum + Number(r.amount), 0) || 0
+  ).toFixed(2)
+);
+
 
     /* ======================================================
        REVENUE TREND 6 MONTHS

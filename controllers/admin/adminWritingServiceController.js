@@ -35,7 +35,6 @@ export const acceptOrder = async (req, res) => {
     const adminId = req.user.id;
     const { id } = req.params;
 
-    // Confirm order exists
     const { data: order } = await supabase
       .from("writing_orders")
       .select("user_id")
@@ -44,19 +43,17 @@ export const acceptOrder = async (req, res) => {
 
     if (!order) return res.status(404).json({ error: "Order not found" });
 
-    // Update order status
     const { error } = await supabase
       .from("writing_orders")
       .update({
         status: "In Progress",
-        author_id: adminId, // admin becomes writer
+        author_id: adminId,
         accepted_at: new Date(),
       })
       .eq("id", id);
 
     if (error) throw error;
 
-    // Notify User
     await supabase.from("user_notifications").insert([
       {
         user_id: order.user_id,
@@ -79,9 +76,8 @@ export const completeOrder = async (req, res) => {
   try {
     const adminId = req.user.id;
     const { id } = req.params;
-    const { content_text, notes_url } = req.body; // admin can upload file OR type text
+    const { content_text, notes_url } = req.body;
 
-    // Fetch order
     const { data: order } = await supabase
       .from("writing_orders")
       .select("user_id, author_id")
@@ -92,20 +88,18 @@ export const completeOrder = async (req, res) => {
     if (order.author_id !== adminId)
       return res.status(403).json({ error: "Unauthorized" });
 
-    // Complete order
     const { error } = await supabase
       .from("writing_orders")
       .update({
         status: "Completed",
         completed_at: new Date(),
         notes_url: notes_url || null,
-        final_text: content_text || null, // admin-written text
+        final_text: content_text || null,
       })
       .eq("id", id);
 
     if (error) throw error;
 
-    // Notify User
     await supabase.from("user_notifications").insert([
       {
         user_id: order.user_id,
@@ -137,7 +131,6 @@ export const rejectOrder = async (req, res) => {
 
     if (!order) return res.status(404).json({ error: "Order not found" });
 
-    // Reject order
     await supabase
       .from("writing_orders")
       .update({
@@ -147,7 +140,6 @@ export const rejectOrder = async (req, res) => {
       })
       .eq("id", id);
 
-    // Notify user
     await supabase.from("user_notifications").insert([
       {
         user_id: order.user_id,
@@ -166,22 +158,15 @@ export const rejectOrder = async (req, res) => {
 /* ===============================
    ADMIN FILE UPLOAD CONTROLLER
 =============================== */
-
-
 export const uploadWritingFile = async (req, res) => {
   try {
-    // Multer already parsed file in router
     const file = req.file;
-
-    if (!file) {
-      return res.status(400).json({ error: "No file provided" });
-    }
+    if (!file) return res.status(400).json({ error: "No file provided" });
 
     const fileName = `${Date.now()}-${file.originalname}`;
 
-    // Upload to Supabase Storage
     const { error: uploadError } = await supabase.storage
-      .from("writing_uploads") // bucket name
+      .from("writing_uploads")
       .upload(fileName, file.buffer, {
         contentType: file.mimetype,
         upsert: false,
@@ -192,34 +177,36 @@ export const uploadWritingFile = async (req, res) => {
       return res.status(500).json({ error: "Supabase upload failed" });
     }
 
-    // Generate public URL
     const { data: publicUrl } = supabase.storage
       .from("writing_uploads")
       .getPublicUrl(fileName);
 
-    return res.json({
+    res.json({
       message: "File uploaded successfully",
       url: publicUrl.publicUrl,
     });
-  } catch (error) {
-    console.error("Upload controller error:", error.message);
-    return res.status(500).json({ error: "Internal server error" });
+  } catch (err) {
+    console.error("Upload controller error:", err.message);
+    res.status(500).json({ error: "Internal server error" });
   }
 };
 
+/* ===============================
+   ADMIN REPLY ON ORDER
+=============================== */
 export const adminReply = async (req, res) => {
   try {
     const adminId = req.user.id;
     const adminName = req.user.user_metadata?.full_name || req.user.email;
-
     const { order_id, message } = req.body;
 
     if (!order_id || !message) {
-      return res.status(400).json({ error: "order_id and message are required" });
+      return res
+        .status(400)
+        .json({ error: "order_id and message are required" });
     }
 
-    // Insert feedback message
-    const { error: feedbackError, data: feedbackData } = await supabase
+    const { data: feedbackData, error: feedbackError } = await supabase
       .from("writing_feedback")
       .insert([
         {
@@ -235,7 +222,6 @@ export const adminReply = async (req, res) => {
 
     if (feedbackError) throw feedbackError;
 
-    // Get order user id (to notify them)
     const { data: orderData, error: orderErr } = await supabase
       .from("writing_orders")
       .select("user_id")
@@ -244,14 +230,11 @@ export const adminReply = async (req, res) => {
 
     if (orderErr) throw orderErr;
 
-    const userId = orderData.user_id;
-
-    // Insert user notification
     const { error: notifError } = await supabase
       .from("user_notifications")
       .insert([
         {
-          user_id: userId,
+          user_id: orderData.user_id,
           title: "New Message From Admin",
           message: `Admin replied to your writing order #${order_id}: "${message}"`,
           created_at: new Date(),
@@ -264,7 +247,6 @@ export const adminReply = async (req, res) => {
       message: "Reply sent & user notified",
       feedback: feedbackData[0],
     });
-
   } catch (err) {
     console.error("adminReply error:", err);
     res.status(500).json({ error: "Reply failed" });
