@@ -1,254 +1,273 @@
 import supabase from "../../utils/supabaseClient.js";
 
-/* ===============================
-   GET ALL ORDERS
-=============================== */
+/* ============================================================
+   ADMIN: GET ALL PAID WRITING ORDERS
+=============================================================== */
 export const getAllOrders = async (req, res) => {
-  const { data, error } = await supabase
-    .from("writing_orders")
-    .select("*")
-    .order("created_at", { ascending: false });
+  try {
+    const { data, error } = await supabase
+      .from("writing_orders")
+      .select("*")
+      .eq("payment_success", true) // ONLY PAID ORDERS
+      .order("created_at", { ascending: false });
 
-  if (error) return res.status(400).json({ error: error.message });
-  res.json(data);
+    if (error) throw error;
+
+    return res.json(data);
+  } catch (err) {
+    console.error("getAllOrders Error:", err);
+    return res.status(500).json({ error: "Failed to load orders" });
+  }
 };
 
-/* ===============================
-   GET ONLY PENDING ORDERS
-=============================== */
+/* ============================================================
+   ADMIN: GET ONLY PENDING PAID ORDERS
+=============================================================== */
 export const getPendingOrders = async (req, res) => {
-  const { data, error } = await supabase
-    .from("writing_orders")
-    .select("*")
-    .eq("status", "Pending")
-    .order("created_at", { ascending: false });
+  try {
+    const { data, error } = await supabase
+      .from("writing_orders")
+      .select("*")
+    .eq("payment_success", true)
 
-  if (error) return res.status(400).json({ error: error.message });
-  res.json(data);
+      .eq("payment_success", true) // ONLY PAID
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    return res.json(data);
+  } catch (err) {
+    console.error("getPendingOrders Error:", err);
+    return res.status(500).json({ error: "Failed to load pending orders" });
+  }
 };
 
-/* ===============================
-   ADMIN ACCEPTS ORDER (Admin = Writer)
-=============================== */
+/* ============================================================
+   ADMIN: ACCEPT ORDER
+=============================================================== */
 export const acceptOrder = async (req, res) => {
   try {
+    const id = req.params.id;
     const adminId = req.user.id;
-    const { id } = req.params;
 
-    const { data: order } = await supabase
+    const { data: order, error: findErr } = await supabase
       .from("writing_orders")
-      .select("user_id")
+      .select("*")
       .eq("id", id)
       .single();
 
-    if (!order) return res.status(404).json({ error: "Order not found" });
+    if (findErr) throw findErr;
+    if (!order.payment_success)
+      return res
+        .status(403)
+        .json({ error: "Cannot accept an unpaid order" });
 
+    // Update status
     const { error } = await supabase
       .from("writing_orders")
       .update({
         status: "In Progress",
         author_id: adminId,
-        accepted_at: new Date(),
+        accepted_at: new Date().toISOString(),
       })
       .eq("id", id);
 
     if (error) throw error;
 
-    await supabase.from("user_notifications").insert([
-      {
-        user_id: order.user_id,
-        title: "Order Accepted",
-        message: `Your writing request (#${id}) is now being worked on.`,
-        created_at: new Date(),
-      },
-    ]);
+    // Notify user
+    await supabase.from("user_notifications").insert({
+      user_id: order.user_id,
+      title: "Order Accepted",
+      message: `Your writing request (#${id}) is now being worked on.`,
+    });
 
-    res.json({ message: "Order accepted. Admin is now writing." });
+    return res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("acceptOrder Error:", err);
+    return res.status(500).json({ error: "Failed to accept order" });
   }
 };
 
-/* ===============================
-   ADMIN COMPLETES ORDER
-=============================== */
+/* ============================================================
+   ADMIN: COMPLETE ORDER
+=============================================================== */
 export const completeOrder = async (req, res) => {
   try {
-    const adminId = req.user.id;
-    const { id } = req.params;
-    const { content_text, notes_url } = req.body;
+    const id = req.params.id;
+    const { final_text, notes_url } = req.body;
 
-    const { data: order } = await supabase
+    const { data: order, error: findErr } = await supabase
       .from("writing_orders")
-      .select("user_id, author_id")
+      .select("*")
       .eq("id", id)
       .single();
 
-    if (!order) return res.status(404).json({ error: "Order not found" });
-    if (order.author_id !== adminId)
-      return res.status(403).json({ error: "Unauthorized" });
+    if (findErr) throw findErr;
+
+    if (!order.payment_success)
+      return res
+        .status(403)
+        .json({ error: "Cannot complete unpaid order" });
 
     const { error } = await supabase
       .from("writing_orders")
       .update({
         status: "Completed",
-        completed_at: new Date(),
-        notes_url: notes_url || null,
-        final_text: content_text || null,
+        final_text,
+        notes_url,
+        completed_at: new Date().toISOString(),
       })
       .eq("id", id);
 
     if (error) throw error;
 
-    await supabase.from("user_notifications").insert([
-      {
-        user_id: order.user_id,
-        title: "Order Completed",
-        message: `Your writing order (#${id}) is now ready. Download or read it.`,
-        created_at: new Date(),
-      },
-    ]);
+    // Notify user
+    await supabase.from("user_notifications").insert({
+      user_id: order.user_id,
+      title: "Order Completed",
+      message: `Your writing order (#${id}) is now ready. Download or read it.`,
+    });
 
-    res.json({ message: "Order completed and delivered to user." });
+    return res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("completeOrder Error:", err);
+    return res.status(500).json({ error: "Failed to complete order" });
   }
 };
 
-/* ===============================
-   ADMIN REJECTS ORDER
-=============================== */
+/* ============================================================
+   ADMIN: REJECT ORDER
+=============================================================== */
 export const rejectOrder = async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id;
     const { reason } = req.body;
 
-    const { data: order } = await supabase
+    if (!reason)
+      return res.status(400).json({ error: "Rejection reason is required" });
+
+    const { data: order, error: findErr } = await supabase
       .from("writing_orders")
-      .select("user_id")
+      .select("*")
       .eq("id", id)
       .single();
 
-    if (!order) return res.status(404).json({ error: "Order not found" });
+    if (findErr) throw findErr;
 
-    await supabase
+    const { error } = await supabase
       .from("writing_orders")
       .update({
         status: "Rejected",
-        rejection_reason: reason || "Not specified",
-        rejected_at: new Date(),
+        rejection_reason: reason,
+        rejected_at: new Date().toISOString(),
       })
       .eq("id", id);
 
-    await supabase.from("user_notifications").insert([
-      {
-        user_id: order.user_id,
-        title: "Order Rejected",
-        message: `Your writing order #${id} was rejected. Reason: ${reason}`,
-        created_at: new Date(),
-      },
-    ]);
+    if (error) throw error;
 
-    res.json({ message: "Order rejected and user notified." });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-};
-
-/* ===============================
-   ADMIN FILE UPLOAD CONTROLLER
-=============================== */
-export const uploadWritingFile = async (req, res) => {
-  try {
-    const file = req.file;
-    if (!file) return res.status(400).json({ error: "No file provided" });
-
-    const fileName = `${Date.now()}-${file.originalname}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from("writing_uploads")
-      .upload(fileName, file.buffer, {
-        contentType: file.mimetype,
-        upsert: false,
-      });
-
-    if (uploadError) {
-      console.error("Supabase upload error:", uploadError.message);
-      return res.status(500).json({ error: "Supabase upload failed" });
-    }
-
-    const { data: publicUrl } = supabase.storage
-      .from("writing_uploads")
-      .getPublicUrl(fileName);
-
-    res.json({
-      message: "File uploaded successfully",
-      url: publicUrl.publicUrl,
+    // Notify user
+    await supabase.from("user_notifications").insert({
+      user_id: order.user_id,
+      title: "Order Rejected",
+      message: `Your writing order #${id} was rejected. Reason: ${reason}`,
     });
+
+    return res.json({ success: true });
   } catch (err) {
-    console.error("Upload controller error:", err.message);
-    res.status(500).json({ error: "Internal server error" });
+    console.error("rejectOrder Error:", err);
+    return res.status(500).json({ error: "Failed to reject order" });
   }
 };
 
-/* ===============================
-   ADMIN REPLY ON ORDER
-=============================== */
+/* ============================================================
+   ADMIN: SEND MESSAGE TO USER
+=============================================================== */
 export const adminReply = async (req, res) => {
   try {
-    const adminId = req.user.id;
-    const adminName = req.user.user_metadata?.full_name || req.user.email;
     const { order_id, message } = req.body;
 
-    if (!order_id || !message) {
-      return res
-        .status(400)
-        .json({ error: "order_id and message are required" });
-    }
+    if (!order_id || !message)
+      return res.status(400).json({ error: "Missing fields" });
 
-    const { data: feedbackData, error: feedbackError } = await supabase
-      .from("writing_feedback")
-      .insert([
-        {
-          order_id,
-          user_id: adminId,
-          user_name: adminName,
-          message,
-          sender: "admin",
-          created_at: new Date(),
-        },
-      ])
-      .select();
+    const adminName = req.user.user_metadata?.full_name || "Admin";
 
-    if (feedbackError) throw feedbackError;
-
-    const { data: orderData, error: orderErr } = await supabase
+    const { data: order, error: findErr } = await supabase
       .from("writing_orders")
       .select("user_id")
       .eq("id", order_id)
       .single();
 
-    if (orderErr) throw orderErr;
+    if (findErr) throw findErr;
 
-    const { error: notifError } = await supabase
-      .from("user_notifications")
-      .insert([
-        {
-          user_id: orderData.user_id,
-          title: "New Message From Admin",
-          message: `Admin replied to your writing order #${order_id}: "${message}"`,
-          created_at: new Date(),
-        },
-      ]);
-
-    if (notifError) throw notifError;
-
-    res.json({
-      message: "Reply sent & user notified",
-      feedback: feedbackData[0],
+    // Store chat message
+    await supabase.from("writing_feedback").insert({
+      order_id,
+      user_id: order.user_id,
+      writer_name: adminName,
+      message,
+      sender: "admin",
+      created_at: new Date(),
     });
+
+    // Notify user
+    await supabase.from("user_notifications").insert({
+      user_id: order.user_id,
+      title: "New Message From Admin",
+      message: `Admin replied to your writing order #${order_id}: "${message}"`,
+    });
+
+    return res.json({ success: true });
   } catch (err) {
-    console.error("adminReply error:", err);
-    res.status(500).json({ error: "Reply failed" });
+    console.error("adminReply Error:", err);
+    return res.status(500).json({ error: "Failed to send reply" });
+  }
+};
+
+/* ============================================================
+   ADMIN: MARK MESSAGE AS READ
+=============================================================== */
+export const markAsRead = async (req, res) => {
+  try {
+    const orderId = req.params.order_id;
+
+    const { error } = await supabase
+      .from("writing_feedback")
+      .update({ read_by_admin: true })
+      .eq("order_id", orderId);
+
+    if (error) throw error;
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("markAsRead Error:", err);
+    return res.status(500).json({ error: "Failed to mark messages" });
+  }
+};
+
+/* ============================================================
+   ADMIN: UPLOAD FINAL NOTES / FILE
+=============================================================== */
+export const uploadWritingFile = async (req, res) => {
+  try {
+    if (!req.file)
+      return res.status(400).json({ error: "File not provided" });
+
+    const file = req.file;
+    const fileName = `admin-${Date.now()}-${file.originalname}`;
+
+    const { data, error } = await supabase.storage
+      .from("writing_uploads")
+      .upload(fileName, file.buffer);
+
+    if (error) throw error;
+
+    const { publicUrl } = supabase.storage
+      .from("writing_uploads")
+      .getPublicUrl(fileName).data;
+
+    return res.json({ url: publicUrl });
+  } catch (err) {
+    console.error("uploadWritingFile Error:", err);
+    return res.status(500).json({ error: "File upload failed" });
   }
 };

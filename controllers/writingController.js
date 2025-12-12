@@ -21,94 +21,6 @@ export const getServices = async (req, res) => {
 };
 
 /* =====================================================
-   PLACE NEW ORDER (DEV: call ONLY AFTER payment confirm)
-===================================================== */
-export const placeOrder = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const userName = req.user.user_metadata?.full_name || req.user.email;
-
-    const {
-      title,
-      type,
-      subject_area,
-      academic_level,
-      pages,
-      deadline,
-      total_price,
-      instructions,
-      attachments_url,
-    } = req.body;
-
-    // Basic validation
-    if (!title || !type) {
-      return res.status(400).json({ error: "Title and type are required" });
-    }
-
-    const pagesNum = Number(pages) || 0;
-    const priceNum = Number(total_price) || 0;
-
-    const insertPayload = {
-      user_id: userId,
-      user_name: userName,
-
-      title,
-      type,
-      subject_area: subject_area || null,
-      academic_level: academic_level || null,
-
-      pages: pagesNum,
-      deadline: deadline || null,
-
-      instructions: instructions || null,
-      attachments_url: attachments_url || null,
-      total_price: priceNum,
-
-      // DEV MODE ASSUMPTION:
-      // This controller is called AFTER payment is "confirmed" in your fake flow.
-      // So: order is paid, but still "Pending" so admin can Accept it.
-      status: "Pending",
-      paid_at: new Date().toISOString(),
-
-      created_at: new Date().toISOString(),
-    };
-
-    const { data, error } = await supabase
-      .from("writing_orders")
-      .insert([insertPayload])
-      .select()
-      .single();
-
-    if (error) {
-      console.error("Supabase insert error (placeOrder):", error);
-      return res.status(500).json({ error: error.message });
-    }
-
-    // Optional: notify user
-    const notif = await supabase.from("user_notifications").insert([
-      {
-        user_id: userId,
-        title: "Writing Order Submitted",
-        message: `Your writing order "${title}" has been submitted successfully.`,
-        created_at: new Date(),
-      },
-    ]);
-
-    if (notif.error) {
-      console.warn("user_notifications insert error:", notif.error.message);
-    }
-
-    return res.json({
-      message: "Order created successfully",
-      order: data,
-    });
-  } catch (err) {
-    console.error("placeOrder error:", err);
-    return res.status(500).json({ error: "Failed to place order" });
-  }
-};
-
-/* =====================================================
    GET ACTIVE ORDERS (Pending + In Progress)
 ===================================================== */
 export const getActiveOrders = async (req, res) => {
@@ -393,25 +305,104 @@ export const getSingleWritingOrder = async (req, res) => {
 };
 export const createWritingOrder = async (req, res) => {
   try {
-    const userId = req.user.id;
     const body = req.body;
 
-    // MUST CHECK: Payment Done?
-    if (!body.payment_success) {
-      return res.status(400).json({ error: "Payment not completed" });
+    // FIX: stop requiring payment_success from frontend
+    if (!body.total_price) {
+      return res.status(400).json({ error: "Invalid order payload" });
     }
 
-    const { error } = await supabase.from("writing_orders").insert({
-      user_id: userId,
-      ...body,
+    const insertPayload = {
+      user_id: req.user.id,
+      user_name: req.user.user_metadata?.full_name || req.user.email,
+
+      title: body.title,
+      type: body.type,
+      academic_level: body.academic_level,
+      subject_area: body.subject_area,
+      pages: Number(body.pages),
+      instructions: body.instructions,
+      attachments_url: body.attachments_url,
+
+      total_price: Number(body.total_price),
+
+      // ALWAYS set as paid (because payment already verified)
+      payment_success: true,
+      payment_status: "Paid",
+      paid_at: new Date().toISOString(),
+
       status: "Pending",
       created_at: new Date(),
-    });
+    };
 
-    res.json({ message: "Order created successfully" });
+    const { data, error } = await supabase
+      .from("writing_orders")
+      .insert(insertPayload)
+      .select()
+      .single();
 
+    if (error) throw error;
+
+    return res.json({ success: true, order: data });
+    
   } catch (err) {
-    console.log(err);
-    res.status(500).json({ error: "Server error" });
+    console.error("createWritingOrder error:", err);
+    return res.status(500).json({ error: err.message });
   }
 };
+
+
+
+export const verifyWritingPayment = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { amount, method, order_temp_id } = req.body;
+
+    if (!amount || !order_temp_id) {
+      return res.status(400).json({ error: "Amount and temp ID required" });
+    }
+
+    // Insert into transactions
+    const { data: txData, error: txErr } = await supabase
+      .from("payments_transactions")
+      .insert([
+        {
+          user_id: userId,
+          amount,
+          status: "completed",
+          method: method || "test-payment",
+          description: `writing_service:${order_temp_id}`,
+          external_ref: order_temp_id,
+          created_at: new Date(),
+        },
+      ])
+      .select()
+      .single();
+
+    if (txErr) throw txErr;
+
+    // Insert revenue
+    const { error: revenueErr } = await supabase
+      .from("revenue") // make sure table exists
+      .insert([
+        {
+          user_id: userId,
+          amount,
+          item_type: "writing_service",
+          created_at: new Date(),
+        },
+      ]);
+
+    if (revenueErr) throw revenueErr;
+
+    return res.json({ success: true, transaction: txData });
+
+  } catch (err) {
+    console.error("verifyWritingPayment ERROR:", err);
+    return res.status(500).json({ error: "Payment verification failed" });
+  }
+};
+
+
+
+

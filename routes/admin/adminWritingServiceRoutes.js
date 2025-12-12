@@ -7,6 +7,8 @@ import {
   rejectOrder,
   adminReply,
   uploadWritingFile,
+  markAsRead,
+
 } from "../../controllers/admin/adminWritingServiceController.js";
 
 import {
@@ -49,6 +51,8 @@ router.put(
   adminOnly,
   rejectOrder
 );
+router.put("/mark-read/:order_id", verifySupabaseAuth.required, markAsRead);
+
 
 // Upload files for writing service
 router.post(

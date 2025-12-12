@@ -26,6 +26,7 @@ import {
   updateCollection,
   getCollectionBookIds,
   resetReading,
+  removeBookFromAllCollections,
 } from "../controllers/libraryController.js";
 
 const router = express.Router();
@@ -65,6 +66,8 @@ router.get("/collections", getAllCollections);
 router.get("/collections/book-ids", getCollectionBookIds);
 router.get("/collections/:id/books", getCollectionBooks);
 router.post("/collections/:id/add", addBookToCollection);
+router.delete("/collections/remove-book/:bookId", removeBookFromAllCollections);
+
 
 router.delete("/collections/:id/remove/:bookId", removeBookFromCollection);
 router.delete("/collections/:id", deleteCollection);

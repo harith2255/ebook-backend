@@ -24,7 +24,8 @@ export const listCustomers = async (req, res) => {
    if (status) query = query.eq("account_status", status);
 
 
-    if (plan) query = query.eq("plan", plan);
+   if (plan) query = query.eq("subscription_plan", plan);
+
 
     if (search) {
     query = query.or(`full_name.ilike.%${search}%,email.ilike.%${search}%`);
@@ -62,7 +63,8 @@ export const suspendCustomer = async (req, res) => {
     // Update real column
     const { error: profileError } = await supabaseAdmin
       .from("profiles")
-      .update({ status: "suspended" })
+     .update({ account_status: "suspended" })
+
       .eq("id", id);
 
     if (profileError) {
@@ -98,7 +100,7 @@ export const activateCustomer = async (req, res) => {
 
     const { error: profileError } = await supabaseAdmin
       .from("profiles")
-      .update({ status: "active" })
+      .update({ account_status: "active" })   // ✔ FIXED
       .eq("id", id);
 
     if (profileError) {
@@ -116,6 +118,7 @@ export const activateCustomer = async (req, res) => {
     res.status(500).json({ error: "Server error activating customer" });
   }
 };
+
 
 
 

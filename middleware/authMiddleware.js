@@ -1,7 +1,8 @@
+import { supabasePublic, supabaseAdmin } from "../utils/supabaseClient.js";
+
+import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 dotenv.config();
-
-import { supabasePublic, supabaseAdmin } from "../utils/supabaseClient.js";
 
 export const verifySupabaseAuth = {
   required: async (req, res, next) => {
@@ -12,27 +13,37 @@ export const verifySupabaseAuth = {
       }
 
       const token = authHeader.split(" ")[1];
-      const { data, error } = await supabasePublic.auth.getUser(token);
 
-      if (error || !data?.user) {
-        return res.status(401).json({ error: "Unauthorized: Invalid token" });
+      /* -------------------------------------------------
+         1️⃣ TRY SUPABASE JWT FIRST
+      ------------------------------------------------- */
+      const { data } = await supabasePublic.auth.getUser(token);
+
+      if (data?.user) {
+        req.user = data.user;
+        return next();
       }
 
-      const { data: profile } = await supabaseAdmin
-        .from("profiles")
-        .select("status")
-        .eq("id", data.user.id)
-        .single();
+      /* -------------------------------------------------
+         2️⃣ FALL BACK TO YOUR CUSTOM app_token
+      ------------------------------------------------- */
+      const decoded = jwt.decode(token);
 
-      if (profile?.status === "Suspended") {
-        return res.status(403).json({ error: "Your account is suspended" });
+      if (!decoded || !decoded.user) {
+        return res.status(401).json({ error: "Invalid token format" });
       }
 
-      req.user = data.user;
-      next();
+      req.user = {
+        id: decoded.user.id,
+        email: decoded.user.email,
+        user_metadata: decoded.user.user_metadata || {},
+      };
+
+      return next();
+
     } catch (err) {
-      console.error("Auth required error:", err);
-      res.status(500).json({ error: "Internal server error" });
+      console.error("Auth middleware error:", err);
+      return res.status(500).json({ error: "Internal server error" });
     }
   },
 
@@ -45,22 +56,26 @@ export const verifySupabaseAuth = {
       }
 
       const token = authHeader.split(" ")[1];
-      const { data, error } = await supabasePublic.auth.getUser(token);
 
-      if (error || !data?.user) {
-        req.user = null;
+      const { data } = await supabasePublic.auth.getUser(token);
+      if (data?.user) {
+        req.user = data.user;
         return next();
       }
 
-      req.user = data.user;
+      const decoded = jwt.decode(token);
+      req.user = decoded?.user || null;
+
       next();
+
     } catch (err) {
       console.error("Auth optional error:", err);
       req.user = null;
       next();
     }
-  },
+  }
 };
+
 
 // FIX: correct backward compatibility
 export default verifySupabaseAuth; // 👈 THIS IS THE FIX

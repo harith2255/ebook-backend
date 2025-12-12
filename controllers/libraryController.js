@@ -819,3 +819,21 @@ export const resetReading = async (req, res) => {
 
   res.json({ message: "Reading reset" });
 };
+export const removeBookFromAllCollections = async (req, res) => {
+  try {
+    const { bookId } = req.params;
+
+    const { error } = await supabase
+      .from("collection_books")
+      .delete()
+      .eq("book_id", bookId);
+
+    if (error) throw error;
+
+    res.json({ message: "Book removed from all collections" });
+
+  } catch (err) {
+    console.error("removeBookFromAllCollections error:", err);
+    return res.status(500).json({ error: "Failed to remove from all collections" });
+  }
+};
