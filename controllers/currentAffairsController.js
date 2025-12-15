@@ -5,11 +5,24 @@ import { supabaseAdmin } from "../utils/supabaseClient.js";
 ---------------------------------- */
 export const getCurrentAffairs = async (req, res) => {
   try {
-    const userId = req.user.id; // auth middleware REQUIRED
+    const userId = req.user.id;
     const { category = "all", search = "", page = 1, limit = 9 } = req.query;
 
     const from = (page - 1) * limit;
     const to = from + Number(limit) - 1;
+
+    const CATEGORY_MAP = {
+      "National Affairs": "national",
+      "International News": "international",
+      "Economy": "economy",
+      "Science & Tech": "science",
+      "Sports": "sports",
+      "Environment": "environment",
+    };
+
+    const REVERSE_CATEGORY_MAP = Object.fromEntries(
+      Object.entries(CATEGORY_MAP).map(([k, v]) => [v, k])
+    );
 
     let query = supabaseAdmin
       .from("current_affairs")
@@ -21,16 +34,19 @@ export const getCurrentAffairs = async (req, res) => {
       .order("article_date", { ascending: false })
       .range(from, to);
 
-    if (category !== "all") query = query.eq("category", category);
-    if (search)
+    if (category !== "all" && REVERSE_CATEGORY_MAP[category]) {
+      query = query.eq("category", REVERSE_CATEGORY_MAP[category]);
+    }
+
+    if (search) {
       query = query.or(`title.ilike.%${search}%,content.ilike.%${search}%`);
+    }
 
     const { data, error, count } = await query;
     if (error) throw error;
 
     const safeData = Array.isArray(data) ? data : [];
 
-    // 🔥 AUTO-INCREMENT VIEWS (ONCE PER USER)
     await Promise.all(
       safeData.map(article =>
         supabaseAdmin.rpc("increment_current_affairs_views_once", {
@@ -47,7 +63,7 @@ export const getCurrentAffairs = async (req, res) => {
       data: safeData.map(a => ({
         id: a.id,
         title: a.title,
-        category: a.category,
+        category: CATEGORY_MAP[a.category] || "all",
         description: a.content,
         tags: a.tags ? a.tags.split(",") : [],
         importance: a.importance,

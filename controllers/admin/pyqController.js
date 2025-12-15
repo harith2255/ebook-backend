@@ -11,8 +11,11 @@ export const uploadPYQ = async (req, res) => {
     const question = req.files?.question?.[0];
     const answer = req.files?.answer?.[0];
 
-    if (!subjectName || !year || !question) {
-      return res.status(400).json({ error: "Missing required fields" });
+    // ✅ CORRECT VALIDATION
+    if (!subjectName || !year || (!question && !answer)) {
+      return res.status(400).json({
+        error: "Either Question Paper or Answer Key is required",
+      });
     }
 
     /* ---------- SUBJECT UPSERT ---------- */
@@ -35,7 +38,7 @@ export const uploadPYQ = async (req, res) => {
 
     const basePath = `${slugify(subjectName)}/${year}`;
 
-    /* ---------- FILE UPLOAD FUNCTION ---------- */
+    /* ---------- FILE UPLOAD ---------- */
     const uploadFile = async (file, type) => {
       const path = `${basePath}/${type}.pdf`;
 
@@ -52,25 +55,28 @@ export const uploadPYQ = async (req, res) => {
         .from("pyq")
         .getPublicUrl(path);
 
-      const insert = await supabaseAdmin.from("pyq_papers").insert({
-  subject_id: subject.id,
-  year,
-  type,
-  title: `${year} ${type === "question" ? "Question Paper" : "Answer Key"}`,
-  file_url: urlData.publicUrl,
-  file_path: path,
-  file_size: (file.size / 1024 / 1024).toFixed(2),
-});
+      const { error: insertError } = await supabaseAdmin
+        .from("pyq_papers")
+        .insert({
+          subject_id: subject.id,
+          year,
+          type, // "question" | "answer"
+          title: `${year} ${
+            type === "question" ? "Question Paper" : "Answer Key"
+          }`,
+          file_url: urlData.publicUrl,
+          file_path: path,
+          file_size: Number((file.size / 1024 / 1024).toFixed(2)),
+        });
 
-
-      if (insert.error) throw insert.error;
+      if (insertError) throw insertError;
     };
 
-    /* ---------- UPLOAD FILES ---------- */
-    await uploadFile(question, "question");
+    /* ---------- UPLOAD BASED ON AVAILABILITY ---------- */
+    if (question) await uploadFile(question, "question");
     if (answer) await uploadFile(answer, "answer");
 
-    /* ---------- UPDATE SUBJECT ---------- */
+    /* ---------- TOUCH SUBJECT ---------- */
     await supabaseAdmin
       .from("pyq_subjects")
       .update({ updated_at: new Date() })
@@ -85,6 +91,7 @@ export const uploadPYQ = async (req, res) => {
     });
   }
 };
+
 export const getSubjects = async (req, res) => {
   const { data, error } = await supabaseAdmin
     .from("pyq_subjects")
