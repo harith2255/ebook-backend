@@ -43,14 +43,17 @@ export const uploadContent = async (req, res) => {
       });
     }
 
-    const table =
-      type === "E-Book"
-        ? "ebooks"
-        : type === "Notes"
-        ? "notes"
-        : type === "Mock Test"
-        ? "mock_tests"
-        : null;
+  const rawType = type.toLowerCase();
+
+const table =
+  ["ebook", "ebooks", "book"].includes(rawType)
+    ? "ebooks"
+    : ["note", "notes"].includes(rawType)
+    ? "notes"
+    : ["mock test", "mock_tests", "test"].includes(rawType)
+    ? "mock_tests"
+    : null;
+
 
     if (!table) {
       return res.status(400).json({ error: "Invalid content type" });
@@ -311,15 +314,22 @@ export const listContent = async (req, res) => {
 export const deleteContent = async (req, res) => {
   try {
     const { type, id } = req.params;
+const rawType = type.toLowerCase();
 
-    const table =
-      type === "book" || type === "ebook" ? "ebooks" :
-      type === "note" ? "notes" :
-      type === "test" ? "mock_tests" :
-      null;
+const table =
+  ["book", "ebook", "ebooks"].includes(rawType)
+    ? "ebooks"
+    : ["note", "notes"].includes(rawType)
+    ? "notes"
+    : ["test", "tests", "mock_test", "mock_tests"].includes(rawType)
+    ? "mock_tests"
+    : null;
 
-    if (!table)
-      return res.status(400).json({ error: "Invalid type" });
+if (!table) {
+  return res.status(400).json({ error: "Invalid content type" });
+}
+
+console.log("🧨 Deleting from table:", table, "ID:", id);
 
     if (table === "ebooks") {
 
@@ -373,11 +383,17 @@ export const editContent = async (req, res) => {
     const file = req.files?.file?.[0] || null;
     const cover = req.files?.cover?.[0] || null;
 
-    const table =
-      type === "book" ? "ebooks" :
-      type === "note" ? "notes" :
-      type === "test" ? "mock_tests" :
-      null;
+   const rawType = type.toLowerCase();
+
+const table =
+  ["book", "ebook", "ebooks"].includes(rawType)
+    ? "ebooks"
+    : ["note", "notes"].includes(rawType)
+    ? "notes"
+    : ["test", "tests", "mock_test", "mock_tests"].includes(rawType)
+    ? "mock_tests"
+    : null;
+
 
     if (!table)
       return res.status(400).json({ error: "Invalid type" });

@@ -95,14 +95,8 @@ export async function login(req, res) {
     /* ==========================================================
        🚫 BLOCK SUSPENDED USERS
     =========================================================== */
-    if (profile?.status?.toLowerCase() === "suspended") {
-      // Kill session immediately
-      await supabase.auth.signOut();
+   const isSuspended = profile?.account_status === "suspended";
 
-      return res.status(403).json({
-        error: "Your account has been suspended. Contact support."
-      });
-    }
 
     let role = profile?.role || "User";
 
@@ -147,14 +141,22 @@ export async function login(req, res) {
     /* ==========================================================
        RESPONSE
     =========================================================== */
-    return res.status(200).json({
-      message: "Login successful",
-      user: { id: userId, email, role, full_name: fullName },
+   return res.status(200).json({
+  message: isSuspended
+    ? "Login successful (Read-only mode)"
+    : "Login successful",
+  user: {
+    id: userId,
+    email,
+    role,
+    full_name: fullName,
+    read_only: isSuspended
+  },
+  access_token: accessToken,
+  token: accessToken,
+  refresh_token: loginData.session?.refresh_token,
+});
 
-      access_token: accessToken,
-      token: accessToken,
-      refresh_token: loginData.session?.refresh_token,
-    });
   } catch (err) {
     console.error("Login error:", err);
     return res.status(500).json({ error: "Internal Server Error" });

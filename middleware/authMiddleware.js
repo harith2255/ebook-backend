@@ -15,32 +15,37 @@ export const verifySupabaseAuth = {
       const token = authHeader.split(" ")[1];
 
       /* -------------------------------------------------
-         1️⃣ TRY SUPABASE JWT FIRST
+         1️⃣ VERIFY TOKEN (SUPABASE)
       ------------------------------------------------- */
-      const { data } = await supabasePublic.auth.getUser(token);
-
-      if (data?.user) {
-        req.user = data.user;
-        return next();
+      const { data, error } = await supabasePublic.auth.getUser(token);
+      if (error || !data?.user) {
+        return res.status(401).json({ error: "Invalid token" });
       }
+
+      req.user = data.user;
 
       /* -------------------------------------------------
-         2️⃣ FALL BACK TO YOUR CUSTOM app_token
+         2️⃣ CHECK ACCOUNT STATUS
       ------------------------------------------------- */
-      const decoded = jwt.decode(token);
+      const { data: profile, error: profileErr } = await supabaseAdmin
+        .from("profiles")
+        .select("account_status")
+        .eq("id", req.user.id)
+        .single();
 
-      if (!decoded || !decoded.user) {
-        return res.status(401).json({ error: "Invalid token format" });
+      if (profileErr) throw profileErr;
+
+      if (profile.account_status === "suspended") {
+        // 🔐 READ-ONLY MODE
+        if (req.method !== "GET") {
+          return res.status(403).json({
+            error: "Account suspended. Read-only access enabled.",
+            mode: "read_only",
+          });
+        }
       }
 
-      req.user = {
-        id: decoded.user.id,
-        email: decoded.user.email,
-        user_metadata: decoded.user.user_metadata || {},
-      };
-
-      return next();
-
+      next();
     } catch (err) {
       console.error("Auth middleware error:", err);
       return res.status(500).json({ error: "Internal server error" });
@@ -56,24 +61,15 @@ export const verifySupabaseAuth = {
       }
 
       const token = authHeader.split(" ")[1];
-
       const { data } = await supabasePublic.auth.getUser(token);
-      if (data?.user) {
-        req.user = data.user;
-        return next();
-      }
 
-      const decoded = jwt.decode(token);
-      req.user = decoded?.user || null;
-
+      req.user = data?.user || null;
       next();
-
     } catch (err) {
-      console.error("Auth optional error:", err);
       req.user = null;
       next();
     }
-  }
+  },
 };
 
 
