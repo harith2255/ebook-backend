@@ -107,10 +107,11 @@ export const activateCustomer = async (req, res) => {
       return res.status(400).json({ error: profileError.message });
     }
 
-    await supabaseAdmin.auth.admin.updateUserById(id, {
-      ban_until: null,
-      revoke_tokens: true,
-    });
+   await supabaseAdmin.auth.admin.updateUserById(id, {
+  ban_until: "1970-01-01T00:00:00Z", // 👈 unban properly
+  revoke_tokens: true,
+});
+
 
     res.json({ message: "Customer activated successfully" });
   } catch (err) {

@@ -378,56 +378,80 @@ console.log("🧨 Deleting from table:", table, "ID:", id);
 export const editContent = async (req, res) => {
   try {
     const { type, id } = req.params;
-    const updates = { ...req.body };
+    const rawType = type.toLowerCase();
 
-    const file = req.files?.file?.[0] || null;
-    const cover = req.files?.cover?.[0] || null;
-
-   const rawType = type.toLowerCase();
-
-const table =
-  ["book", "ebook", "ebooks"].includes(rawType)
-    ? "ebooks"
-    : ["note", "notes"].includes(rawType)
-    ? "notes"
-    : ["test", "tests", "mock_test", "mock_tests"].includes(rawType)
-    ? "mock_tests"
-    : null;
-
+    const table =
+      ["book", "ebook", "ebooks"].includes(rawType)
+        ? "ebooks"
+        : ["note", "notes"].includes(rawType)
+        ? "notes"
+        : ["test", "tests", "mock_test", "mock_tests"].includes(rawType)
+        ? "mock_tests"
+        : null;
 
     if (!table)
       return res.status(400).json({ error: "Invalid type" });
 
-    /* ==================== FILE REPLACE ==================== */
+    const updates = {};
+    const allowedFields = {
+      ebooks: ["title", "author", "category", "description", "price", "status"],
+      notes: ["title", "author", "category", "description", "price", "featured"],
+      mock_tests: [
+        "title",
+        "subject",
+        "difficulty",
+        "total_questions",
+        "duration_minutes",
+        "start_time",
+        "description"
+      ],
+    };
+
+    for (const key of allowedFields[table]) {
+      if (req.body[key] !== undefined) {
+        updates[key] = req.body[key];
+      }
+    }
+
+    if (updates.price !== undefined) {
+      updates.price = Number(updates.price);
+    }
+
+    Object.keys(updates).forEach((k) => {
+      if (updates[k] === "") delete updates[k];
+    });
+
+    const file = req.files?.file?.[0];
+    const cover = req.files?.cover?.[0];
+
     if (file) {
       const filePath = `${Date.now()}-${file.originalname}`;
-      const { error } = await supabaseAdmin.storage
+
+      await supabaseAdmin.storage
         .from(table)
         .upload(filePath, file.buffer, {
           contentType: file.mimetype,
         });
-
-      if (error)
-        return res.status(400).json({ error: error.message });
 
       const { data } = supabaseAdmin.storage
         .from(table)
         .getPublicUrl(filePath);
 
       updates.file_url = data?.publicUrl;
+
+      if (file.mimetype === "application/pdf") {
+        updates.pages = getPdfPageCount(file.buffer);
+      }
     }
 
-    /* ==================== COVER REPLACE ==================== */
     if (cover) {
       const coverPath = `${Date.now()}-${cover.originalname}`;
-      const { error } = await supabaseAdmin.storage
+
+      await supabaseAdmin.storage
         .from("covers")
         .upload(coverPath, cover.buffer, {
           contentType: cover.mimetype,
         });
-
-      if (error)
-        return res.status(400).json({ error: error.message });
 
       const { data } = supabaseAdmin.storage
         .from("covers")
@@ -436,7 +460,6 @@ const table =
       updates.cover_url = data?.publicUrl;
     }
 
-    /* ==================== UPDATE DB ==================== */
     const { data, error } = await supabaseAdmin
       .from(table)
       .update(updates)
@@ -447,13 +470,14 @@ const table =
     if (error)
       return res.status(400).json({ error: error.message });
 
-    return res.json({ message: "Content updated", data });
+    res.json({ message: "Content updated", data });
 
   } catch (err) {
     console.error("editContent error:", err);
-    return res.status(500).json({ error: "Server error editing content" });
+    res.status(500).json({ error: "Server error editing content" });
   }
 };
+
 
 
 export default {
