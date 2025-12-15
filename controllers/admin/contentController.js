@@ -1,4 +1,5 @@
-import supabase from "../../utils/supabaseClient.js";
+import { supabaseAdmin } from "../../utils/supabaseClient.js";
+
 import getPdfPageCount from "../../utils/pdfReader.js";
 
 /* ============================================================================
@@ -63,7 +64,7 @@ export const uploadContent = async (req, res) => {
     if (file) {
       const filePath = `${Date.now()}-${file.originalname}`;
 
-      const { error: uploadErr } = await supabase.storage
+      const { error: uploadErr } = await supabaseAdmin.storage
         .from(table)
         .upload(filePath, file.buffer, {
           contentType: file.mimetype,
@@ -75,7 +76,7 @@ export const uploadContent = async (req, res) => {
         return res.status(400).json({ error: uploadErr.message });
       }
 
-      const { data: publicData } = supabase.storage
+      const { data: publicData } = supabaseAdmin.storage
         .from(table)
         .getPublicUrl(filePath);
 
@@ -94,7 +95,7 @@ export const uploadContent = async (req, res) => {
     if (cover) {
       const coverPath = `${Date.now()}-${cover.originalname}`;
 
-      const { error: coverErr } = await supabase.storage
+      const { error: coverErr } = await supabaseAdmin.storage
         .from("covers")
         .upload(coverPath, cover.buffer, {
           contentType: cover.mimetype,
@@ -106,7 +107,7 @@ export const uploadContent = async (req, res) => {
         return res.status(400).json({ error: coverErr.message });
       }
 
-      const { data: coverData } = supabase.storage
+      const { data: coverData } = supabaseAdmin.storage
         .from("covers")
         .getPublicUrl(coverPath);
 
@@ -198,7 +199,7 @@ export const uploadContent = async (req, res) => {
     }
 
     /* ==================== INSERT MAIN ROW ==================== */
-    const { data: insertData, error: insertError } = await supabase
+    const { data: insertData, error: insertError } = await supabaseAdmin
       .from(table)
       .insert(insertObj)
       .select()
@@ -226,7 +227,7 @@ if (type === "Mock Test" && Array.isArray(mcqs) && mcqs.length > 0) {
     explanation: mcq.explanation || null  // ✅ FIXED
   }));
 
-  const { error: qErr } = await supabase
+  const { error: qErr } = await supabaseAdmin
     .from("mock_test_questions")
     .insert(questionRows);
 
@@ -274,7 +275,7 @@ export const listContent = async (req, res) => {
       return res.status(400).json({ error: "Invalid type" });
 
     if (table === "mock_tests") {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
   .from("mock_tests")
   .select("*")
   .order("created_at", { ascending: false });
@@ -286,7 +287,7 @@ export const listContent = async (req, res) => {
       return res.json({ contents: data });
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from(table)
       .select("*")
       .order("created_at", { ascending: false });
@@ -323,22 +324,22 @@ export const deleteContent = async (req, res) => {
     if (table === "ebooks") {
 
       // Delete from collections
-      await supabase.from("collection_books")
+      await supabaseAdmin.from("collection_books")
         .delete()
         .eq("book_id", id);
 
       // Delete from user library
-      await supabase.from("user_library")
+      await supabaseAdmin.from("user_library")
         .delete()
         .eq("book_id", id);
 
       // Delete highlights
-      await supabase.from("highlights")
+      await supabaseAdmin.from("highlights")
         .delete()
         .eq("book_id", id);
     }
 
-    const { error, count } = await supabase
+    const { error, count } = await supabaseAdmin
       .from(table)
       .delete({ count: "exact" })
       .eq("id", id);
@@ -384,7 +385,7 @@ export const editContent = async (req, res) => {
     /* ==================== FILE REPLACE ==================== */
     if (file) {
       const filePath = `${Date.now()}-${file.originalname}`;
-      const { error } = await supabase.storage
+      const { error } = await supabaseAdmin.storage
         .from(table)
         .upload(filePath, file.buffer, {
           contentType: file.mimetype,
@@ -393,7 +394,7 @@ export const editContent = async (req, res) => {
       if (error)
         return res.status(400).json({ error: error.message });
 
-      const { data } = supabase.storage
+      const { data } = supabaseAdmin.storage
         .from(table)
         .getPublicUrl(filePath);
 
@@ -403,7 +404,7 @@ export const editContent = async (req, res) => {
     /* ==================== COVER REPLACE ==================== */
     if (cover) {
       const coverPath = `${Date.now()}-${cover.originalname}`;
-      const { error } = await supabase.storage
+      const { error } = await supabaseAdmin.storage
         .from("covers")
         .upload(coverPath, cover.buffer, {
           contentType: cover.mimetype,
@@ -412,7 +413,7 @@ export const editContent = async (req, res) => {
       if (error)
         return res.status(400).json({ error: error.message });
 
-      const { data } = supabase.storage
+      const { data } = supabaseAdmin.storage
         .from("covers")
         .getPublicUrl(coverPath);
 
@@ -420,7 +421,7 @@ export const editContent = async (req, res) => {
     }
 
     /* ==================== UPDATE DB ==================== */
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from(table)
       .update(updates)
       .eq("id", id)

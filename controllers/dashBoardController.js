@@ -154,22 +154,12 @@ export async function getDashboardData(req, res) {
     if (userErr && userErr.code !== "PGRST116") throw userErr;
 
     if (!userData) {
-      // create a minimal profile if missing
-      const { data: newProfile, error: upsertErr } = await supabase
-        .from("profiles")
-        .upsert({
-          id: userId,
-          email: req.user.email,
-          full_name:
-            req.user.user_metadata?.full_name ||
-            req.user.email?.split("@")[0],
-        })
-        .select()
-        .single();
+  userData = {
+    full_name: req.user.user_metadata?.full_name || "User",
+    email: req.user.email,
+  };
+}
 
-      if (upsertErr) throw upsertErr;
-      userData = newProfile;
-    }
 
     // --------------------
     // Final assembled response
