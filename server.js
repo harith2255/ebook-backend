@@ -84,6 +84,7 @@ import purchaseRoutes from "./routes/purchaseRoutes.js"; // ⭐ PURCHASE
 import testRoutes from "./routes/testRoutes.js";
 import examRoutes from "./routes/examRoutes.js";
 import userDrmRoutes from "./routes/userDrmRoutes.js";
+import userPyqRoutes from "./routes/userPyqRoutes.js";
 // ---------- Admin Routes ----------
 import admindashboardRoutes from "./routes/admin/admindashboardRoutes.js";
 import customerRoutes from "./routes/admin/customerRoutes.js";
@@ -122,6 +123,8 @@ app.use("/api/profile", profileRoutes);
 app.use("/api/test", testRoutes);
 app.use("/api/exams", examRoutes);
 app.use("/api/drm", userDrmRoutes);  // normal users
+app.use("/api/pyq", userPyqRoutes);
+
 
 
 // ⭐ ADMIN ROUTES
