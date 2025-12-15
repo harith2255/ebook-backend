@@ -46,45 +46,7 @@ export const updateDRMSettings = async (req, res) => {
     return res.status(500).json({ error: "Failed to update settings" });
   }
 };
-export const logAccessEvent = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const { book_id, page, device_id } = req.body;
 
-    if (!book_id)
-      return res.status(400).json({ error: "book_id required" });
-
-    // Get user name
-    const { data: user } = await supabase
-      .from("profiles")
-      .select("full_name")
-      .eq("id", userId)
-      .maybeSingle();
-
-    // Get book name
-    const { data: book } = await supabase
-      .from("ebooks")
-      .select("title")
-      .eq("id", book_id)
-      .maybeSingle();
-
-    await supabase.from("drm_access_logs").insert({
-      user_id: userId,
-      user_name: user?.full_name ?? "Unknown",
-      book_id,
-      book_title: book?.title ?? "Unknown Book",
-      action: "read",
-      device_info: device_id ?? req.headers["user-agent"],
-      ip_address: req.ip,
-      created_at: new Date(),
-    });
-
-    res.json({ success: true });
-  } catch (err) {
-    console.error("logAccessEvent error:", err);
-    res.status(500).json({ error: "Failed to log event" });
-  }
-};
 
 
 /* ======================================================

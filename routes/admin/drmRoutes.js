@@ -7,7 +7,7 @@ import {
   revokeAccess,
   downloadAccessReport,
   getAccessLogs,
-  logAccessEvent,
+  
 
 } from "../../controllers/admin/drmController.js";
 
@@ -27,12 +27,6 @@ router.put(
   verifySupabaseAuth.required,
   adminOnly,
   updateDRMSettings
-);
-router.post(
-  "/log",
-  verifySupabaseAuth.required,
-  adminOnly,
-  logAccessEvent
 );
 
 /* ------------------------------

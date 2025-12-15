@@ -97,6 +97,7 @@ import adminJobRoutes from "./routes/admin/jobRoutes.js";
 import systemSettings from "./routes/admin/systemSettingsRoutes.js";
 import adminWritingServiceRoutes from "./routes/admin/adminWritingServiceRoutes.js";
 import adminExamRoutes from "./routes/admin/adminExamRoutes.js";
+import adminPyqRoutes from "./routes/admin/adminPyqRoutes.js"
 
 // ---------- PUBLIC CONTENT (user side) ----------
 import publicContentRoutes from "./routes/publicContentRoutes.js";
@@ -138,6 +139,7 @@ app.use("/api/admin/writing-service", adminWritingServiceRoutes);
 import adminPaymentsRoutes from "./routes/admin/paymentRoutes.js";
 app.use("/api/admin/payments", adminPaymentsRoutes);
 app.use("/api/admin/exams", adminExamRoutes);
+app.use("/api/admin/pyq",adminPyqRoutes)
 
 // ⭐ PUBLIC CONTENT FOR USERS (notes, mocktests)
 app.use("/api/content", publicContentRoutes);
