@@ -85,6 +85,7 @@ import testRoutes from "./routes/testRoutes.js";
 import examRoutes from "./routes/examRoutes.js";
 import userDrmRoutes from "./routes/userDrmRoutes.js";
 import userPyqRoutes from "./routes/userPyqRoutes.js";
+import currentAffairsUserRoutes from "./routes/currentAffairsRoutes.js";
 // ---------- Admin Routes ----------
 import admindashboardRoutes from "./routes/admin/admindashboardRoutes.js";
 import customerRoutes from "./routes/admin/customerRoutes.js";
@@ -99,6 +100,7 @@ import systemSettings from "./routes/admin/systemSettingsRoutes.js";
 import adminWritingServiceRoutes from "./routes/admin/adminWritingServiceRoutes.js";
 import adminExamRoutes from "./routes/admin/adminExamRoutes.js";
 import adminPyqRoutes from "./routes/admin/adminPyqRoutes.js"
+import currentAffairsRoutes from "./routes/admin/adminCurrentAffairsRoutes.js";
 
 // ---------- PUBLIC CONTENT (user side) ----------
 import publicContentRoutes from "./routes/publicContentRoutes.js";
@@ -124,6 +126,7 @@ app.use("/api/test", testRoutes);
 app.use("/api/exams", examRoutes);
 app.use("/api/drm", userDrmRoutes);  // normal users
 app.use("/api/pyq", userPyqRoutes);
+app.use("/api/current-affairs", currentAffairsUserRoutes);
 
 
 
@@ -142,7 +145,8 @@ app.use("/api/admin/writing-service", adminWritingServiceRoutes);
 import adminPaymentsRoutes from "./routes/admin/paymentRoutes.js";
 app.use("/api/admin/payments", adminPaymentsRoutes);
 app.use("/api/admin/exams", adminExamRoutes);
-app.use("/api/admin/pyq",adminPyqRoutes)
+app.use("/api/admin/pyq",adminPyqRoutes);
+app.use("/api/admin/current-affairs", currentAffairsRoutes);
 
 // ⭐ PUBLIC CONTENT FOR USERS (notes, mocktests)
 app.use("/api/content", publicContentRoutes);
