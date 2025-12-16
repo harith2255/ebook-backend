@@ -9,8 +9,12 @@ import supabase from "../utils/supabaseClient.js";
  * we use `added_at` when filtering for "books completed this month".
  * This is a limitation — see the migration SQL below to add `completed_at`.
  */
+
+
 export async function getDashboardData(req, res) {
+  console.log("REQ.USER:", req.user);
   try {
+
     const userId = req.user?.id || req.user?.user_metadata?.app_user_id;
 
     if (!userId) {
