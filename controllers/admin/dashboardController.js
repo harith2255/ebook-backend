@@ -14,85 +14,106 @@ function percentChange(current, previous) {
 
 export const getAdminDashboard = async (req, res) => {
   try {
+    const now = new Date();
+    const nowISO = now.toISOString();
+
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+    const sixMonthsAgo = new Date(now);
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+    const page = Number(req.query.page) || 1;
+    const limit = 10;
+    const start = (page - 1) * limit;
+    const end = start + limit - 1;
+
+    /* ======================================================
+       PARALLEL DB QUERIES (BIG SPEED GAIN)
+    ====================================================== */
+    const [
+      customersRes,
+      activeSubsRes,
+      booksSoldRes,
+      revenueMonthRes,
+      revenueTrendRes,
+      activityRes,
+    ] = await Promise.all([
+      // USERS (id + created_at only, same as before)
+      supabaseAdmin
+        .from("v_customers")
+        .select("id, created_at"),
+
+      // ACTIVE SUBSCRIPTIONS
+      supabaseAdmin
+        .from("user_subscriptions")
+        .select("*", { count: "exact", head: true })
+        .eq("status", "active")
+        .gte("expires_at", nowISO),
+
+      // BOOKS SOLD
+      supabaseAdmin
+        .from("revenue")
+        .select("id", { count: "exact", head: true })
+        .eq("item_type", "book"),
+
+      // REVENUE MTD
+      supabaseAdmin
+        .from("revenue")
+        .select("amount, created_at")
+        .gte("created_at", firstDay.toISOString()),
+
+      // REVENUE TREND (6 MONTHS)
+      supabaseAdmin
+        .from("revenue")
+        .select("amount, created_at")
+        .gte("created_at", sixMonthsAgo.toISOString()),
+
+      // RECENT ACTIVITY
+      supabaseAdmin
+        .from("activity_log")
+        .select("*", { count: "exact" })
+        .neq("type", "login")
+        .order("created_at", { ascending: false })
+        .range(start, end),
+    ]);
+
     /* ======================================================
        USERS
     ====================================================== */
-    const { data: customers, error: customersErr } = await supabaseAdmin
-      .from("v_customers")
-      .select("id, created_at");
-
-    if (customersErr) {
-      console.error("v_customers error:", customersErr);
+    if (customersRes.error) {
+      console.error("v_customers error:", customersRes.error);
       return res.status(500).json({ error: "Failed to fetch user data" });
     }
 
-    const totalUsers = customers?.length || 0;
-    const nowISO = new Date().toISOString();
+    const customers = customersRes.data || [];
+    const totalUsers = customers.length;
 
     /* ======================================================
        ACTIVE SUBSCRIPTIONS
     ====================================================== */
-    const { count: activeSubs, error: subsErr } = await supabaseAdmin
-      .from("user_subscriptions")
-      .select("*", { count: "exact", head: true })
-      .eq("status", "active")
-      .gte("expires_at", nowISO);
-
-    if (subsErr) {
-      console.error("subscriptions error:", subsErr);
-    }
+    const activeSubs = activeSubsRes.count || 0;
 
     /* ======================================================
        BOOKS SOLD
     ====================================================== */
-    const { count: booksSold, error: booksErr } = await supabaseAdmin
-      .from("revenue")
-      .select("id", { count: "exact", head: true })
-      .eq("item_type", "book");
-
-    if (booksErr) {
-      console.error("books error:", booksErr);
-    }
+    const booksSold = booksSoldRes.count || 0;
 
     /* ======================================================
        REVENUE MTD
     ====================================================== */
-    const firstDay = new Date();
-    firstDay.setDate(1);
-
-    const { data: revenueMonth, error: revMonthErr } = await supabaseAdmin
-      .from("revenue")
-      .select("amount, created_at")
-      .gte("created_at", firstDay.toISOString());
-
-    if (revMonthErr) {
-      console.error("revenue MTD error:", revMonthErr);
-    }
-
     const revenueMTD = Number(
-  (
-    revenueMonth?.reduce((sum, r) => sum + Number(r.amount), 0) || 0
-  ).toFixed(2)
-);
-
+      (
+        revenueMonthRes.data?.reduce(
+          (sum, r) => sum + Number(r.amount),
+          0
+        ) || 0
+      ).toFixed(2)
+    );
 
     /* ======================================================
-       REVENUE TREND 6 MONTHS
+       REVENUE TREND (GROUPED)
     ====================================================== */
-    const sixMonthsAgo = new Date();
-    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-
-    const { data: rows, error: trendErr } = await supabaseAdmin
-      .from("revenue")
-      .select("amount, created_at")
-      .gte("created_at", sixMonthsAgo.toISOString());
-
-    if (trendErr) {
-      console.error("revenue trend error:", trendErr);
-    }
-
     const revenueTrend = {};
-    rows?.forEach((r) => {
+    revenueTrendRes.data?.forEach((r) => {
       const m = formatMonth(r.created_at);
       revenueTrend[m] = (revenueTrend[m] || 0) + Number(r.amount);
     });
@@ -100,12 +121,12 @@ export const getAdminDashboard = async (req, res) => {
     /* ======================================================
        USER SIGNUP TREND
     ====================================================== */
-    const recentUsers = customers?.filter(
+    const recentUsers = customers.filter(
       (u) => u.created_at && new Date(u.created_at) >= sixMonthsAgo
     );
 
     const userTrend = {};
-    recentUsers?.forEach((u) => {
+    recentUsers.forEach((u) => {
       const m = formatMonth(u.created_at);
       userTrend[m] = (userTrend[m] || 0) + 1;
     });
@@ -113,34 +134,31 @@ export const getAdminDashboard = async (req, res) => {
     /* ======================================================
        MERGE TRENDS FOR CHART
     ====================================================== */
-    const months = [...new Set([...Object.keys(revenueTrend), ...Object.keys(userTrend)])];
-
     const monthOrder = [
       "Jan","Feb","Mar","Apr","May","Jun",
       "Jul","Aug","Sep","Oct","Nov","Dec"
     ];
 
-    const sortedMonths = months.sort(
-      (a, b) => monthOrder.indexOf(a) - monthOrder.indexOf(b)
-    );
+    const months = [
+      ...new Set([...Object.keys(revenueTrend), ...Object.keys(userTrend)])
+    ].sort((a, b) => monthOrder.indexOf(a) - monthOrder.indexOf(b));
 
-    const chartData = sortedMonths.map((m) => ({
+    const chartData = months.map((m) => ({
       month: m,
       revenue: revenueTrend[m] || 0,
       users: userTrend[m] || 0,
     }));
 
     /* ======================================================
-       KPI % DIFF
+       KPI % CHANGE (UNCHANGED LOGIC)
     ====================================================== */
-    const prevMonth = sortedMonths.length >= 2
-      ? sortedMonths[sortedMonths.length - 2]
-      : null;
+    const prevMonth =
+      months.length >= 2 ? months[months.length - 2] : null;
 
     const prevUsers = userTrend[prevMonth] || 0;
     const prevRevenue = revenueTrend[prevMonth] || 0;
 
-    const userGrowthPercent = percentChange(recentUsers?.length, prevUsers);
+    const userGrowthPercent = percentChange(recentUsers.length, prevUsers);
     const revenueGrowthPercent = percentChange(revenueMTD, prevRevenue);
 
     const prevBooks = booksSold > 1 ? booksSold - 1 : 1;
@@ -150,28 +168,13 @@ export const getAdminDashboard = async (req, res) => {
     const subsGrowthPercent = percentChange(activeSubs, prevSubs);
 
     /* ======================================================
-       RECENT ACTIVITY (Exclude Login)
+       ACTIVITY PAGINATION
     ====================================================== */
-    const page = Number(req.query.page) || 1;
-    const limit = 10;
-    const start = (page - 1) * limit;
-    const end = start + limit - 1;
-
-    const { data: activities, count, error: actErr } = await supabaseAdmin
-      .from("activity_log")
-      .select("*", { count: "exact" })
-      .neq("type", "login") // remove login spam
-      .order("created_at", { ascending: false })
-      .range(start, end);
-
-    if (actErr) {
-      console.error("activity error:", actErr);
-    }
-
-    const totalPages = Math.ceil((count || 0) / limit);
+    const activities = activityRes.data || [];
+    const totalPages = Math.ceil((activityRes.count || 0) / limit);
 
     /* ======================================================
-       RESPONSE
+       RESPONSE (IDENTICAL SHAPE)
     ====================================================== */
     return res.json({
       kpis: {
@@ -185,11 +188,11 @@ export const getAdminDashboard = async (req, res) => {
         subsGrowthPercent,
       },
       chartData,
-      recentActivity: activities || [],
+      recentActivity: activities,
       activityPagination: {
         page,
         totalPages,
-        total: count || 0,
+        total: activityRes.count || 0,
       },
     });
 

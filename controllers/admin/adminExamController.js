@@ -70,7 +70,17 @@ export async function uploadNote(req, res) {
 
     if (!req.file) return res.status(400).json({ error: "PDF file required" });
 
-    const subject = await findOrCreateSubject(label, value);
+   const { data: subject } = await supabase
+   .from("subjects")
+   .select("*")
+   .eq("value", value)
+   .single();
+
+ if (!subject) {
+   return res.status(400).json({
+     error: "Subject does not exist. Create subject first.",
+   });
+ }
 
     const filename = `${uuid()}-${req.file.originalname}`;
     const path = `study_notes/${filename}`;
@@ -117,8 +127,17 @@ export async function createExam(req, res) {
     if (!label || !value || !title)
       return res.status(400).json({ error: "Missing required fields" });
 
-    const subject = await findOrCreateSubject(label, value);
+   const { data: subject } = await supabase
+   .from("subjects")
+   .select("*")
+   .eq("value", value)
+   .single();
 
+ if (!subject) {
+   return res.status(400).json({
+     error: "Subject does not exist. Create subject first.",
+   });
+ }
     const { data, error } = await supabase
       .from("exams")
       .insert([
@@ -355,87 +374,90 @@ export async function getExamSubmissions(req, res) {
 /*                           GET FOLDERS (ADMIN UI)                            */
 /* -------------------------------------------------------------------------- */
 export async function getFolders(req, res) {
-  console.log("🔥 getFolders req.user =", {
-    id: req.user?.id,
-    email: req.user?.email,
-  });
-
   try {
-    const { data: subjects } = await supabase
-      .from("subjects")
-      .select("*")
-      .order("label");
-
     const now = dayjs();
+
+    const [{ data: subjects }, { data: notes }, { data: exams }] =
+      await Promise.all([
+        supabase.from("subjects").select("id,label").order("label"),
+        supabase.from("study_notes").select("*"),
+        supabase.from("exams").select("*"),
+      ]);
+
+    // group notes by subject
+    const notesBySubject = {};
+    for (const n of notes || []) {
+      if (!notesBySubject[n.subject_id]) notesBySubject[n.subject_id] = [];
+      notesBySubject[n.subject_id].push(n);
+    }
+
+    // group exams by subject
+    const examsBySubject = {};
+    for (const e of exams || []) {
+      if (!examsBySubject[e.subject_id]) examsBySubject[e.subject_id] = [];
+      examsBySubject[e.subject_id].push(e);
+    }
+
+    // get submission counts in ONE query
+    const { data: submissionStats } = await supabase
+      .from("submissions")
+      .select("exam_id, score")
+      .not("exam_id", "is", null);
+
+    const stats = {};
+    for (const s of submissionStats || []) {
+      if (!stats[s.exam_id]) stats[s.exam_id] = { total: 0, graded: 0 };
+      stats[s.exam_id].total++;
+      if (s.score !== null) stats[s.exam_id].graded++;
+    }
+
     const folders = [];
 
     for (const s of subjects || []) {
-      const { data: subjectNotesRaw } = await supabase
-        .from("study_notes")
-        .select("*")
-        .eq("subject_id", s.id)
-        .order("created_at", { ascending: false });
+      const subjectNotes = await Promise.all(
+        (notesBySubject[s.id] || []).map(async (n) => {
+          const { data } = await supabase.storage
+            .from("notes-files")
+            .createSignedUrl(n.file_path, 300);
 
-      const subjectNotes = [];
-      for (const n of subjectNotesRaw || []) {
-        const { data: storageData } = await supabase.storage
-          .from(NOTES_BUCKET)
-          .createSignedUrl(n.file_path, 300);
+          return {
+            id: n.id,
+            name: n.file_name,
+            url: data?.signedUrl ?? null,
+            createdAt: n.created_at,
+          };
+        })
+      );
 
-        subjectNotes.push({
-          id: n.id,
-          name: n.file_name,
-          url: storageData?.signedUrl ?? null,
-          createdAt: n.created_at,
-        });
-      }
+      const subjectExams = await Promise.all(
+        (examsBySubject[s.id] || []).map(async (e) => {
+          const unlocked =
+            (!e.start_time || dayjs(e.start_time).isBefore(now)) &&
+            (!e.end_time || dayjs(e.end_time).isAfter(now));
 
-      const { data: subjectExamsRaw } = await supabase
-        .from("exams")
-        .select("*")
-        .eq("subject_id", s.id)
-        .order("created_at", { ascending: false });
+          let url = null;
+          if (e.file_path) {
+            const { data } = await supabase.storage
+              .from("exam-files")
+              .createSignedUrl(e.file_path, 300);
+            url = data?.signedUrl ?? null;
+          }
 
-      const subjectExams = [];
-for (const e of subjectExamsRaw || []) {
+          const st = stats[e.id] || { total: 0, graded: 0 };
 
-  const unlocked =
-    (!e.start_time || dayjs(e.start_time).isBefore(now)) &&
-    (!e.end_time || dayjs(e.end_time).isAfter(now));
-
-  // Admin MUST ALWAYS see file
-  let url = null;
-  if (e.file_path) {
-    const { data: signed } = await supabase.storage
-      .from(EXAMS_BUCKET)
-      .createSignedUrl(e.file_path, 300);
-
-    url = signed?.signedUrl ?? null;
-  }
-
-  const { count } = await supabase
-    .from("submissions")
-    .select("*", { head: true, count: "exact" })
-    .eq("exam_id", e.id);
-
-  const { data: graded } = await supabase
-    .from("submissions")
-    .select("id")
-    .eq("exam_id", e.id)
-    .not("score", "is", null);
-
-  subjectExams.push({
-    id: e.id,
-    name: e.file_name || e.title,
-    url,
-    unlocked,
-    submissions: count ?? 0,
-    graded_count: graded?.length ?? 0,
-    createdAt: e.created_at,
-    start_time: e.start_time,
-    end_time: e.end_time,
-  });
-}
+          return {
+            id: e.id,
+            name: e.file_name || e.title,
+            url,
+            unlocked,
+            submissions: st.total,
+            graded_count: st.graded,
+            createdAt: e.created_at,
+            start_time: e.start_time,
+            end_time: e.end_time,
+          };
+        })
+      );
 
       folders.push({
         id: s.id,
@@ -451,6 +473,7 @@ for (const e of subjectExamsRaw || []) {
     return res.status(500).json({ error: err.message });
   }
 }
+
 
 /* -------------------------------------------------------------------------- */
 /*                       UNIFIED UPLOAD (NOTE / EXAM FILE)                     */

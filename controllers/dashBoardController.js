@@ -12,7 +12,6 @@ import supabase from "../utils/supabaseClient.js";
 
 
 export async function getDashboardData(req, res) {
-  console.log("REQ.USER:", req.user);
   try {
 
     const userId = req.user?.id || req.user?.user_metadata?.app_user_id;

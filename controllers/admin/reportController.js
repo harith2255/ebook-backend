@@ -47,7 +47,8 @@ export const getAnalytics = async (req, res) => {
     /* ---------------- Revenue (from revenue table) ---------------- */
     const { data: revenueRows, error: revErr } = await supabaseAdmin
       .from("revenue")
-      .select("amount, created_at, item_type")
+      .select("amount, created_at, item_type", { head: false })
+
       .gte("created_at", oldestDate.toISOString());
 
     if (revErr) return res.status(400).json({ error: revErr.message });
@@ -70,7 +71,8 @@ export const getAnalytics = async (req, res) => {
     /* ---------------- Users (from v_customers) ---------------- */
     const { data: usersRows, error: userErr } = await supabaseAdmin
       .from("v_customers")
-      .select("id, created_at")
+     .select("created_at")
+
       .gte("created_at", oldestDate.toISOString());
 
     if (userErr) return res.status(400).json({ error: userErr.message });

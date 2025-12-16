@@ -7,9 +7,10 @@ export const getDRMSettings = async (req, res) => {
   try {
     const { data, error } = await supabase
       .from("drm_settings")
-      .select("*")
+      .select("id, copy_protection, watermarking, device_limit, screenshot_prevention")
+
       .eq("id", 1)
-      .single();
+      .maybeSingle();
 
     if (error) return res.status(400).json({ error: error.message });
 
@@ -56,7 +57,7 @@ export const getAccessLogs = async (req, res) => {
   try {
     const { data, error } = await supabase
       .from("drm_access_logs")
-      .select("*")
+      .select("user_id, user_name, action, book_title, device_info, ip_address, created_at")
       .order("created_at", { ascending: false })
       .limit(100);
 
