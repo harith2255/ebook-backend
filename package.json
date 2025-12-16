@@ -9,6 +9,7 @@
     "@supabase/supabase-js": "^2.83.0",
     "axios": "^1.13.2",
     "bcrypt": "^6.0.0",
+    "compression": "^1.8.1",
     "cors": "^2.8.5",
     "csv-writer": "^1.6.0",
     "dayjs": "^1.11.19",

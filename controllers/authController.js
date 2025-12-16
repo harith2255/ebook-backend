@@ -1,9 +1,8 @@
-import supabase from "../utils/supabaseClient.js";
+import supabase from "../utils/supabaseClient.js"; // anon
+import { supabaseAdmin } from "../utils/supabaseClient.js"; // service role
+
 import { logActivity } from "../utils/activityLogger.js";
 
-/* =====================================================
-   🧠 REGISTER NEW USER
-===================================================== */
 export async function register(req, res) {
   try {
     const { first_name, last_name, email, password } = req.body;
@@ -14,45 +13,51 @@ export async function register(req, res) {
 
     const full_name = `${first_name} ${last_name}`;
 
-    // Create Supabase Auth User
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { first_name, last_name, full_name } },
-    });
+    /* 1️⃣ CREATE AUTH USER (this triggers profile creation automatically) */
+    const { data: authData, error: authError } =
+      await supabaseAdmin.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: { first_name, last_name, full_name },
+      });
 
-    if (authError) return res.status(400).json({ error: authError.message });
+    if (authError) {
+      console.error("Auth error:", authError);
+      return res.status(400).json({ error: authError.message });
+    }
 
     const userId = authData.user.id;
 
-    // Insert into PROFILES table
-    const { error: insertError } = await supabase.from("profiles").insert({
-      id: userId,
-      email,
-      first_name,
-      last_name,
-      full_name,
-      role: "User",
-      status: "Active",
-      plan: "free",
-    });
+    /* 2️⃣ UPDATE PROFILE (DO NOT INSERT) */
+    const { error: profileUpdateError } = await supabaseAdmin
+      .from("profiles")
+      .update({
+        first_name,
+        last_name,
+        full_name,
+        plan: "free",
+        status: "active",
+        role: "User",
+      })
+      .eq("id", userId);
 
-    if (insertError) {
-      console.error("Profile insert error:", insertError);
-      return res.status(500).json({ error: "Failed to save user profile" });
+    if (profileUpdateError) {
+      console.error("Profile update error:", profileUpdateError);
+      return res
+        .status(500)
+        .json({ error: "Database error creating new user" });
     }
 
-    // Log Activity
+    /* 3️⃣ ACTIVITY LOG */
     await logActivity(userId, full_name, "created an account", "activity");
 
     return res.status(201).json({
       message: "Account created successfully",
       user: {
         id: userId,
-        first_name,
-        last_name,
-        full_name,
         email,
+        full_name,
         role: "User",
       },
     });
@@ -63,73 +68,60 @@ export async function register(req, res) {
 }
 
 
+
+
 /* =====================================================
    🧠 LOGIN USER  +  DRM LOGGING  +  SUSPENSION CHECK
 ===================================================== */
 export async function login(req, res) {
   try {
     const { email, password } = req.body;
-
     if (!email || !password)
       return res.status(400).json({ error: "Email and password required" });
 
-    // Authenticate
+    // ✅ USER LOGIN (anon client)
     const { data: loginData, error: loginError } =
       await supabase.auth.signInWithPassword({ email, password });
 
-    if (loginError) return res.status(400).json({ error: loginError.message });
+    if (loginError)
+      return res.status(400).json({ error: loginError.message });
 
     const userId = loginData.user.id;
-    const accessToken = loginData.session?.access_token;
+    const accessToken = loginData.session.access_token;
 
-    // Fetch profile
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select("status, full_name, first_name, last_name, role, email")
-      .eq("id", userId)
-      .single();
+    // ✅ PROFILE FETCH (admin)
+    const { data: profile, error: profileError } =
+      await supabaseAdmin
+        .from("profiles")
+        .select("status, full_name, first_name, last_name, role, email")
+        .eq("id", userId)
+        .single();
 
     if (profileError)
       return res.status(400).json({ error: profileError.message });
 
-    /* ==========================================================
-       🚫 BLOCK SUSPENDED USERS
-    =========================================================== */
-   const isSuspended = profile?.account_status === "suspended";
+    const isSuspended = profile.status === "Suspended";
+    let role = profile.role || "User";
 
-
-    let role = profile?.role || "User";
-
-    /* ==========================================================
-       👑 SUPER ADMIN OVERRIDE
-    =========================================================== */
+    // Super admin override
     if (email === process.env.SUPER_ADMIN_EMAIL) {
       role = "super_admin";
-
-      const { error: metadataError } =
-        await supabase.auth.admin.updateUserById(userId, {
-          app_metadata: { role: "super_admin" },
-        });
-
-      if (metadataError) console.error("Metadata update error:", metadataError);
-
-      await supabase.from("profiles").upsert([{ id: userId, role }]);
+      await supabaseAdmin.auth.admin.updateUserById(userId, {
+        app_metadata: { role },
+      });
+      await supabaseAdmin.from("profiles").upsert({ id: userId, role });
     }
 
     const fullName =
-      profile?.full_name ||
-      `${profile?.first_name || ""} ${profile?.last_name || ""}`.trim() ||
-      email;
+      profile.full_name ||
+      `${profile.first_name || ""} ${profile.last_name || ""}`.trim();
 
-    // Log activity only for user (not admin)
     if (role === "User") {
       await logActivity(userId, fullName, "logged in", "login");
     }
 
-    /* ==========================================================
-       ⭐ DRM ACCESS LOGGING (LOGIN)
-    =========================================================== */
-    await supabase.from("drm_access_logs").insert({
+    // DRM login log
+    await supabaseAdmin.from("drm_access_logs").insert({
       user_id: userId,
       user_name: fullName,
       action: "login",
@@ -138,25 +130,20 @@ export async function login(req, res) {
       created_at: new Date(),
     });
 
-    /* ==========================================================
-       RESPONSE
-    =========================================================== */
-   return res.status(200).json({
-  message: isSuspended
-    ? "Login successful (Read-only mode)"
-    : "Login successful",
-  user: {
-    id: userId,
-    email,
-    role,
-    full_name: fullName,
-    read_only: isSuspended
-  },
-  access_token: accessToken,
-  token: accessToken,
-  refresh_token: loginData.session?.refresh_token,
-});
-
+    return res.json({
+      message: isSuspended
+        ? "Login successful (Read-only mode)"
+        : "Login successful",
+      user: {
+        id: userId,
+        email,
+        role,
+        full_name: fullName,
+        read_only: isSuspended,
+      },
+      access_token: accessToken,
+      refresh_token: loginData.session.refresh_token,
+    });
   } catch (err) {
     console.error("Login error:", err);
     return res.status(500).json({ error: "Internal Server Error" });
@@ -164,42 +151,46 @@ export async function login(req, res) {
 }
 
 
+
 /* =====================================================
    🚪 LOGOUT USER + DRM LOGGING ADDED HERE
 ===================================================== */
 export async function logout(req, res) {
   try {
-    const { user } = req;
+    const accessToken =
+      req.headers.authorization?.replace("Bearer ", "");
 
-    // Supabase logout
-    const { error } = await supabase.auth.signOut();
-    if (error) return res.status(400).json({ error: error.message });
+    if (!accessToken) {
+      return res.status(400).json({ error: "No token provided" });
+    }
 
-    // Activity Log
-    if (user && user.role === "User") {
+    const { error } = await supabase.auth.signOut({
+      accessToken,
+    });
+
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    // Activity log
+    if (req.user && req.user.role === "User") {
       await logActivity(
-        user.id,
-        user.full_name || user.email,
+        req.user.id,
+        req.user.full_name || req.user.email,
         "logged out",
         "login"
       );
     }
 
-    /* ==========================================================
-       ⭐ NEW: DRM ACCESS LOGGING (LOGOUT)
-    =========================================================== */
-    if (user) {
-      await supabase.from("drm_access_logs").insert({
-        user_id: user.id,
-        user_name: user.full_name || user.email,
-        action: "logout",
-        book_id: null,
-        book_title: null,
-        device_info: req.headers["user-agent"],
-        ip_address: req.ip,
-        created_at: new Date(),
-      });
-    }
+    // DRM log
+    await supabaseAdmin.from("drm_access_logs").insert({
+      user_id: req.user?.id,
+      user_name: req.user?.full_name || req.user?.email,
+      action: "logout",
+      device_info: req.headers["user-agent"],
+      ip_address: req.ip,
+      created_at: new Date(),
+    });
 
     return res.status(200).json({ message: "Logged out successfully" });
   } catch (err) {
@@ -207,3 +198,4 @@ export async function logout(req, res) {
     return res.status(500).json({ error: "Internal Server Error" });
   }
 }
+

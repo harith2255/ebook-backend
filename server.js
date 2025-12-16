@@ -5,30 +5,37 @@ import bodyParser from "body-parser";
 import cron from "node-cron";
 import supabase from "./utils/supabaseClient.js";
 
+import compression from "compression";
+
+
+
+
 dotenv.config();
 const app = express();
 
 // cors
+const allowedOrigins = new Set([
+  "http://localhost:3000",
+  "http://localhost:3001",
+  "http://localhost:4173",
+  "https://e-book-gray-one.vercel.app",
+]);
+
 app.use(
   cors({
-    origin: [
-      "http://localhost:3000",
-      "http://localhost:3001",
-      "http://127.0.0.1:3000",
-      "http://127.0.0.1:3001",
-      "https://e-book-gray-one.vercel.app",
-    ],
+    origin(origin, cb) {
+      if (!origin || allowedOrigins.has(origin)) return cb(null, true);
+      cb(new Error("Not allowed by CORS"));
+    },
     credentials: true,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization","x-device-id"],
   })
 );
 
-// ---------- Middleware ----------
-app.use(bodyParser.json());
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// ---------- Middleware ----------
+app.use(compression());
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
 // ---------- CRON JOB ----------
 cron.schedule("*/5 * * * *", async () => {
