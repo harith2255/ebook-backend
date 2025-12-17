@@ -63,104 +63,97 @@ export async function listSubjects(req, res) {
 /* -------------------------------------------------------------------------- */
 export async function uploadNote(req, res) {
   try {
-    const { label, value } = req.body;
+    const { subject_id } = req.body;
 
-    if (!label || !value)
-      return res.status(400).json({ error: "label & value required" });
+    if (!subject_id)
+      return res.status(400).json({ error: "subject_id required" });
 
-    if (!req.file) return res.status(400).json({ error: "PDF file required" });
+    if (!req.file)
+      return res.status(400).json({ error: "PDF file required" });
 
-   const { data: subject } = await supabase
-   .from("subjects")
-   .select("*")
-   .eq("value", value)
-   .single();
+    // 🔒 reliable lookup
+    const { data: subject } = await supabase
+      .from("subjects")
+      .select("id")
+      .eq("id", subject_id)
+      .single();
 
- if (!subject) {
-   return res.status(400).json({
-     error: "Subject does not exist. Create subject first.",
-   });
- }
+    if (!subject)
+      return res.status(400).json({ error: "Invalid subject" });
 
     const filename = `${uuid()}-${req.file.originalname}`;
     const path = `study_notes/${filename}`;
 
-    const { error: uploadErr } = await supabase.storage
-      .from(NOTES_BUCKET)
+    await supabase.storage
+      .from("notes-files")
       .upload(path, req.file.buffer, {
         contentType: req.file.mimetype,
       });
 
-    if (uploadErr) throw uploadErr;
-
     const { data, error } = await supabase
       .from("study_notes")
-      .insert([
-        {
-          subject_id: subject.id,
-          title: req.file.originalname,
-          file_name: req.file.originalname,
-          file_path: path,
-          uploaded_by: req.user.id,
-          created_by: req.user.id,
-        },
-      ])
+      .insert({
+        subject_id,
+        title: req.file.originalname,
+        file_name: req.file.originalname,
+        file_path: path,
+        uploaded_by: req.user?.id ?? null,
+        created_by: req.user?.id ?? null,
+      })
       .select()
       .single();
 
     if (error) throw error;
 
-    return res.json({ success: true, note: data });
+    res.json({ success: true, note: data });
   } catch (err) {
     console.error("uploadNote:", err);
-    return res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message });
   }
 }
+
 
 /* -------------------------------------------------------------------------- */
 /*                                 CREATE EXAM                                 */
 /* -------------------------------------------------------------------------- */
 export async function createExam(req, res) {
   try {
-    const { label, value, title, description, start_time, end_time } = req.body;
+    const { subject_id, title, description, start_time, end_time } = req.body;
 
-    if (!label || !value || !title)
-      return res.status(400).json({ error: "Missing required fields" });
+    if (!subject_id || !title)
+      return res.status(400).json({ error: "subject_id & title required" });
 
-   const { data: subject } = await supabase
-   .from("subjects")
-   .select("*")
-   .eq("value", value)
-   .single();
+    const { data: subject } = await supabase
+      .from("subjects")
+      .select("id")
+      .eq("id", subject_id)
+      .single();
 
- if (!subject) {
-   return res.status(400).json({
-     error: "Subject does not exist. Create subject first.",
-   });
- }
+    if (!subject)
+      return res.status(400).json({ error: "Invalid subject" });
+
     const { data, error } = await supabase
       .from("exams")
-      .insert([
-        {
-          subject_id: subject.id,
-          title,
-          description,
-          created_by: req.user.id,
-          start_time: start_time || null,
-          end_time: end_time || null,
-        },
-      ])
+      .insert({
+        subject_id,
+        title,
+        description,
+        created_by: req.user?.id ?? null,
+        start_time: start_time || null,
+        end_time: end_time || null,
+      })
       .select()
       .single();
 
     if (error) throw error;
 
-    return res.json({ success: true, exam: data });
+    res.json({ success: true, exam: data });
   } catch (err) {
     console.error("createExam:", err);
-    return res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message });
   }
 }
+
 
 /* -------------------------------------------------------------------------- */
 /*                              UPLOAD EXAM FILE                               */
@@ -629,11 +622,14 @@ export async function uploadMultipleNotes(req, res) {
       const { data, error } = await supabase
         .from("study_notes")
         .insert({
-          subject_id,
-          title: file.originalname,
-          file_name: file.originalname,
-          file_path: path,
-        })
+  subject_id,
+  title: file.originalname,
+  file_name: file.originalname,
+  file_path: path,
+  uploaded_by: req.user?.id ?? null,
+  created_by: req.user?.id ?? null,
+})
+
         .select()
         .single();
 
@@ -673,11 +669,13 @@ export async function uploadMultipleExams(req, res) {
       const { data, error } = await supabase
         .from("exams")
         .insert({
-          subject_id,
-          title: file.originalname,
-          file_name: file.originalname,
-          file_path: path,
-        })
+  subject_id,
+  title: file.originalname,
+  file_name: file.originalname,
+  file_path: path,
+  created_by: req.user?.id ?? null,
+})
+
         .select()
         .single();
 
