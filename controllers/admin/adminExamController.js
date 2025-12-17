@@ -89,6 +89,10 @@ export async function uploadNote(req, res) {
       .upload(path, req.file.buffer, {
         contentType: req.file.mimetype,
       });
+const { data: roleCheck } = await supabase.rpc("current_setting", {
+  setting_name: "role"
+});
+console.log("DB ROLE:", roleCheck);
 
     const { data, error } = await supabase
       .from("study_notes")
