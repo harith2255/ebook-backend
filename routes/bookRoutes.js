@@ -22,15 +22,8 @@ router.get("/", verifySupabaseAuth.required, getAllBooks);
 // Search books by name (requires login)
 router.get("/search", verifySupabaseAuth.required, searchBooksByName);
 
-/*
-  IMPORTANT:
-  drmCheck BEFORE reading a book.
-  ✔ checks subscription
-  ✔ checks device limits
-  ✔ logs access
-  ✔ returns DRM flags to frontend
-*/
-router.get("/:id", verifySupabaseAuth.optional, getBookById);
+
+router.get("/:id", verifySupabaseAuth.required, getBookById);
 
 // Log a book reading event
 router.post("/read", verifySupabaseAuth.required, drmCheck, logBookRead);

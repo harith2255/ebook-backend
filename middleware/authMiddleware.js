@@ -6,70 +6,73 @@ dotenv.config();
 
 export const verifySupabaseAuth = {
   required: async (req, res, next) => {
-  try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith("Bearer ")) {
-      return res.status(401).json({ error: "Missing Authorization header" });
-    }
-
-    const token = authHeader.split(" ")[1];
-
-    // 1️⃣ Verify Supabase token
-    const { data, error } = await supabasePublic.auth.getUser(token);
-    if (error || !data?.user) {
-      return res.status(401).json({ error: "Invalid token" });
-    }
-
-    req.user = data.user;
-
-    // 2️⃣ Fetch profile safely
-    const { data: profile, error: profileErr } = await supabaseAdmin
-      .from("profiles")
-      .select("account_status")
-      .eq("id", req.user.id)
-      .maybeSingle();
-
-    if (profileErr) {
-      console.error("Profile fetch error:", profileErr);
-      return res.status(500).json({ error: "Profile lookup failed" });
-    }
-
-    if (!profile) {
-      return res.status(403).json({ error: "User profile not found" });
-    }
-
-    // 3️⃣ Handle suspension
-    if (profile.account_status === "suspended" && req.method !== "GET") {
-      return res.status(403).json({
-        error: "Account suspended. Read-only access enabled.",
-        mode: "read_only",
-      });
-    }
-
-    next();
-  } catch (err) {
-    console.error("Auth middleware error:", err);
-    return res.status(500).json({ error: "Internal server error" });
-  }
-},
-
-
-  optional: async (req, res, next) => {
     try {
       const authHeader = req.headers.authorization;
+console.log("AUTH CHECK:", {
+  path: req.path,
+  token: !!req.headers.authorization,
+});
+
       if (!authHeader?.startsWith("Bearer ")) {
-        req.user = null;
-        return next();
+        console.warn("❌ Missing Authorization header");
+        return res.status(401).json({ error: "Missing Authorization header" });
       }
 
       const token = authHeader.split(" ")[1];
-      const { data } = await supabasePublic.auth.getUser(token);
 
-      req.user = data?.user || null;
+      // 1️⃣ Verify Supabase token
+      const { data, error } = await supabasePublic.auth.getUser(token);
+
+      if (error || !data?.user) {
+        console.warn("❌ Invalid Supabase token", error);
+        return res.status(401).json({ error: "Invalid token" });
+      }
+
+      req.user = data.user;
+
+      // 2️⃣ Profile lookup
+      const { data: profile, error: profileErr } = await supabaseAdmin
+        .from("profiles")
+        .select("account_status")
+        .eq("id", req.user.id)
+        .maybeSingle();
+
+      if (profileErr) {
+        console.error("🔥 Profile DB error:", profileErr);
+        return res.status(500).json({ error: "Profile lookup failed" });
+      }
+
+      // 🔥 AUTO-FIX + LOG
+      if (!profile) {
+        console.warn("⚠️ Profile missing. Auto-creating:", req.user.id);
+
+        const { error: insertErr } = await supabaseAdmin
+          .from("profiles")
+          .insert({
+            id: req.user.id,
+            email: req.user.email,
+            account_status: "active",
+            created_at: new Date().toISOString(),
+          });
+
+        if (insertErr) {
+          console.error("🔥 Profile auto-create failed:", insertErr);
+          return res.status(500).json({ error: "Profile setup failed" });
+        }
+      }
+
+      // 3️⃣ Suspension check
+      if (profile?.account_status === "suspended" && req.method !== "GET") {
+        console.warn("🚫 Suspended user attempted write:", req.user.id);
+        return res.status(403).json({
+          error: "Account suspended. Read-only access enabled.",
+        });
+      }
+
       next();
     } catch (err) {
-      req.user = null;
-      next();
+      console.error("🔥 Auth middleware crash:", err);
+      return res.status(500).json({ error: "Internal server error" });
     }
   },
 };

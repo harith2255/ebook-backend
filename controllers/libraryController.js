@@ -19,13 +19,17 @@ export const getUserLibrary = async (req, res) => {
         book_id,
         purchased_at,
         ebooks!fk_book_sales_book (
-          id,
-          title,
-          author,
-          category,
-          cover_url,
-          pages
-        )
+  id,
+  title,
+  author,
+  cover_url,
+  pages,
+  categories (
+    id,
+    name
+  )
+)
+
       `)
       .eq("user_id", userId)
       .order("purchased_at", { ascending: false });
@@ -56,14 +60,15 @@ export const getUserLibrary = async (req, res) => {
       return {
         book_id: row.book_id,
 
-        ebooks: {
-          id: ebook.id,
-          title: ebook.title,
-          author: ebook.author,
-          category: ebook.category,
-          cover_url: ebook.cover_url || "https://placehold.co/300x400",
-          pages: ebook.pages || 0,
-        },
+       ebooks: {
+  id: ebook.id,
+  title: ebook.title,
+  author: ebook.author,
+  category: ebook.categories?.name ?? null,
+  cover_url: ebook.cover_url || "https://placehold.co/300x400",
+  pages: ebook.pages || 0,
+},
+
 
         progress: Number(lib.progress ?? 0),
         added_at: row.purchased_at || null,
@@ -146,17 +151,21 @@ export const getRecentBooks = async (req, res) => {
       progress,
       added_at,
       ebooks!fk_user_library_ebooks (
-        id,
-        title,
-        author,
-        category,
-        description,
-        cover_url,
-        file_url,
-        pages,
-        price,
-        sales
-      )
+  id,
+  title,
+  author,
+  description,
+  cover_url,
+  file_url,
+  pages,
+  price,
+  sales,
+  categories (
+    id,
+    name
+  )
+)
+
     `)
     .eq("user_id", userId)
     .order("added_at", { ascending: false })
@@ -179,17 +188,21 @@ export const getCurrentlyReading = async (req, res) => {
       progress,
       added_at,
       ebooks!fk_user_library_ebooks (
-        id,
-        title,
-        author,
-        category,
-        description,
-        cover_url,
-        file_url,
-        pages,
-        price,
-        sales
-      )
+  id,
+  title,
+  author,
+  description,
+  cover_url,
+  file_url,
+  pages,
+  price,
+  sales,
+  categories (
+    id,
+    name
+  )
+)
+
     `)
     .eq("user_id", userId)
     .gt("progress", 0)
@@ -211,18 +224,22 @@ export const getCompletedBooks = async (req, res) => {
       id,
       progress,
       added_at,
-      ebooks!fk_user_library_ebooks (
-        id,
-        title,
-        author,
-        category,
-        description,
-        cover_url,
-        file_url,
-        pages,
-        price,
-        sales
-      )
+     ebooks!fk_user_library_ebooks (
+  id,
+  title,
+  author,
+  description,
+  cover_url,
+  file_url,
+  pages,
+  price,
+  sales,
+  categories (
+    id,
+    name
+  )
+)
+
     `)
     .eq("user_id", userId)
     .eq("progress", 100);
@@ -245,18 +262,22 @@ export const searchLibrary = async (req, res) => {
         id,
         progress,
         added_at,
-        ebooks!fk_user_library_ebooks (
-          id,
-          title,
-          author,
-          category,
-          description,
-          cover_url,
-          file_url,
-          pages,
-          price,
-          sales
-        )
+       ebooks!fk_user_library_ebooks (
+  id,
+  title,
+  author,
+  description,
+  cover_url,
+  file_url,
+  pages,
+  price,
+  sales,
+  categories (
+    id,
+    name
+  )
+)
+
       `)
       .eq("user_id", userId);
 
@@ -319,7 +340,18 @@ export const getCollectionBooks = async (req, res) => {
     // 3) Fetch ebook details
     const { data: books, error: booksErr } = await supabase
       .from("ebooks")
-      .select("id, title, author, category, cover_url, pages")
+      .select(`
+  id,
+  title,
+  author,
+  cover_url,
+  pages,
+  categories (
+    id,
+    name
+  )
+`)
+
       .in("id", ids);
 
     if (booksErr) throw booksErr;
@@ -329,7 +361,8 @@ export const getCollectionBooks = async (req, res) => {
       id: b.id,
       title: b.title,
       author: b.author,
-      category: b.category,
+      category: b.categories?.name ?? null,
+
       cover_url: b.cover_url || "https://placehold.co/300x400",
       pages: b.pages
     }));

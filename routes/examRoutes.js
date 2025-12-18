@@ -17,7 +17,7 @@ const router = express.Router();
 /* ---------------- USER ROUTES ---------------- */
 
 // User: View folders, notes, exams
-router.get("/folders", verifySupabaseAuth.optional, getFoldersForUser);
+router.get("/folders", verifySupabaseAuth.required, getFoldersForUser);
 
 // User: View user's own submissions
 router.get("/submissions/me", verifySupabaseAuth.required, getUserSubmissions);
@@ -33,10 +33,10 @@ router.post(
 /* ---------------- EXAM PUBLIC ROUTES ---------------- */
 
 // List all exams (public)
-router.get("/", verifySupabaseAuth.optional, listExams);
+router.get("/", verifySupabaseAuth.required, listExams);
 
 // Get exam details (public)
-router.get("/:id", verifySupabaseAuth.optional, getExam);
+router.get("/:id", verifySupabaseAuth.required, getExam);
 
 /* ---------------- ADMIN ROUTES ---------------- */
 export default router;

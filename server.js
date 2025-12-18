@@ -119,7 +119,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/books", bookRoutes);
 
 // ⭐ USER PURCHASE
-app.use("/api/purchase", purchaseRoutes);
+app.use("/api/purchases", purchaseRoutes);
 
 // Regular user routes
 app.use("/api/dashboard", dashboardRoutes);

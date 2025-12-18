@@ -8,7 +8,9 @@ import { validate as isUUID } from "uuid";
 =============================================================== */
 export const unifiedPurchase = async (req, res) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.user.id;
+
+
 
     // user_id must be a UUID
     if (!userId || !isUUID(userId)) {
@@ -278,7 +280,9 @@ async function processNotePurchase(userId, noteId) {
 =============================================================== */
 export const checkPurchase = async (req, res) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.user.id;
+
+
     const { bookId, noteId } = req.query;
 
     if (!userId || !isUUID(userId)) {
@@ -342,7 +346,9 @@ export const checkPurchase = async (req, res) => {
 =============================================================== */
 export const getPurchasedBooks = async (req, res) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.user.id;
+
+
 
     if (!userId || !isUUID(userId)) {
       return res.status(400).json({ error: "Invalid user id" });
@@ -380,7 +386,8 @@ export const getPurchasedBooks = async (req, res) => {
 =============================================================== */
 export const getPurchasedBookIds = async (req, res) => {
   try {
-    const userId = req.user?.id;
+   const userId = req.user.id;
+
 
     if (!userId || !isUUID(userId)) {
       return res.status(400).json({ error: "Invalid user id" });
@@ -405,7 +412,9 @@ export const getPurchasedBookIds = async (req, res) => {
 =============================================================== */
 export const getPurchasedNoteIds = async (req, res) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.user.id;
+
+
 
     if (!userId || !isUUID(userId)) {
       return res.status(400).json({ error: "Invalid user id" });

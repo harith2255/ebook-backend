@@ -45,7 +45,7 @@ router.post(
 // routes/notes.js
 router.get("/:id/preview-pdf", getNotePreviewPdf);
 // Get note details + DRM
-router.get("/:id", verifySupabaseAuth.optional, getNoteById);
+router.get("/:id", verifySupabaseAuth.required, getNoteById);
 
 // Note Highlights
 router.get("/highlights/:id", verifySupabaseAuth.required, getNoteHighlights);

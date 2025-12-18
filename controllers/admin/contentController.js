@@ -7,13 +7,23 @@ import getPdfPageCount from "../../utils/pdfReader.js";
    POST /api/admin/content/upload
 ============================================================================ */
 
+const slugify = (str = "") =>
+  str
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-");
 
 export const uploadContent = async (req, res) => {
   try {
-    const { type } = req.body;
+   const rawType = String(req.body.type || "").trim();
+const typeKey = rawType.toLowerCase();
+
+
     const title = req.body.title || "";
     const author = req.body.author || "";
-    const category = req.body.category || null;
+    const rawCategory = req.body.category || null;
+    let categoryId = null;
+
     const description = req.body.description || null;
     const price = req.body.price ? Number(req.body.price) : null;
 
@@ -33,26 +43,28 @@ export const uploadContent = async (req, res) => {
     // ---------------------------
     // BASIC VALIDATION
     // ---------------------------
-    if (!type || !title) {
-      return res.status(400).json({ error: "type and title are required" });
-    }
+  if (!rawType || !title) {
+  return res.status(400).json({ error: "type and title are required" });
+}
 
-    if (type !== "Mock Test" && !author) {
-      return res.status(400).json({
-        error: "author is required for E-Book and Notes",
-      });
-    }
+if (rawType !== "Mock Test" && !author) {
+  return res.status(400).json({
+    error: "author is required for E-Book and Notes",
+  });
+}
 
-  const rawType = type.toLowerCase();
+
+  
 
 const table =
-  ["ebook", "ebooks", "book"].includes(rawType)
+ ["book", "books", "ebook", "ebooks", "e-book", "e-books"].includes(typeKey)
     ? "ebooks"
-    : ["note", "notes"].includes(rawType)
+    : ["note", "notes"].includes(typeKey)
     ? "notes"
-    : ["mock test", "mock_tests", "test"].includes(rawType)
+    : ["mock test", "mock_tests", "test", "tests"].includes(typeKey)
     ? "mock_tests"
     : null;
+
 
 
     if (!table) {
@@ -62,6 +74,44 @@ const table =
     let publicUrl = null;
     let coverUrl = null;
     let pageCount = 0;
+
+
+
+    /* ==================== CATEGORY AUTO CREATE ==================== */
+if (rawCategory) {
+  const cleanCategory = rawCategory.trim();
+  const slug = slugify(cleanCategory);
+
+  // Check if category exists
+  const { data: existingCategory } = await supabaseAdmin
+    .from("categories")
+    .select("id")
+    .eq("slug", slug)
+    .single();
+
+  if (existingCategory) {
+    categoryId = existingCategory.id;
+  } else {
+    // Create category
+    const { data: newCategory, error: catErr } = await supabaseAdmin
+      .from("categories")
+      .insert({
+        name: cleanCategory,
+        slug,
+      })
+      .select()
+      .single();
+
+    if (catErr) {
+      console.error("Category insert error:", catErr);
+      return res.status(400).json({ error: "Failed to create category" });
+    }
+
+    categoryId = newCategory.id;
+  }
+}
+
+
 
     /* ==================== FILE UPLOAD ==================== */
     if (file) {
@@ -124,7 +174,7 @@ const table =
       insertObj = {
         title,
         author,
-        category,
+         category_id: categoryId,
         description,
         pages: pageCount,
         price,
@@ -139,7 +189,7 @@ const table =
     if (table === "notes") {
       insertObj = {
         title,
-        category,
+        category_id: categoryId,
         author,
         pages: pageCount,
         downloads: 0,
@@ -215,7 +265,7 @@ const table =
 
     /* ==================== INSERT MCQs (for Mock Test) ==================== */
     /* ==================== INSERT MCQs (for Mock Test) ==================== */
-if (type === "Mock Test" && Array.isArray(mcqs) && mcqs.length > 0) {
+if (rawType === "Mock Test" && Array.isArray(mcqs) && mcqs.length > 0) {
   const testId = insertData.id;
 
   const questionRows = mcqs.map((mcq) => ({
@@ -266,37 +316,46 @@ if (type === "Mock Test" && Array.isArray(mcqs) && mcqs.length > 0) {
 ============================================================================ */
 export const listContent = async (req, res) => {
   try {
-    const { type } = req.query;
+    const rawType = String(req.query.type || "").toLowerCase().trim();
 
-    let table =
-      ["book", "books", "ebook", "ebooks"].includes(type) ? "ebooks" :
-      ["note", "notes"].includes(type) ? "notes" :
-      ["test", "tests", "mock_test", "mock_tests"].includes(type) ? "mock_tests" :
-      null;
+    const table =
+      ["book", "books", "ebook", "ebooks"].includes(rawType)
+        ? "ebooks"
+        : ["note", "notes"].includes(rawType)
+        ? "notes"
+        : ["test", "tests", "mock_test", "mock_tests"].includes(rawType)
+        ? "mock_tests"
+        : null;
 
-    if (!table)
+    if (!table) {
       return res.status(400).json({ error: "Invalid type" });
+    }
 
+    // MOCK TESTS (no categories)
     if (table === "mock_tests") {
       const { data, error } = await supabaseAdmin
-  .from("mock_tests")
-  .select("*")
-  .order("created_at", { ascending: false });
+        .from("mock_tests")
+        .select("*")
+        .order("created_at", { ascending: false });
 
-
-      if (error)
-        return res.status(400).json({ error: error.message });
-
+      if (error) return res.status(400).json({ error: error.message });
       return res.json({ contents: data });
     }
 
+    // ✅ BOOKS + NOTES (JOIN categories)
     const { data, error } = await supabaseAdmin
       .from(table)
-      .select("*")
+      .select(`
+        *,
+        categories (
+          id,
+          name,
+          slug
+        )
+      `)
       .order("created_at", { ascending: false });
 
-    if (error)
-      return res.status(400).json({ error: error.message });
+    if (error) return res.status(400).json({ error: error.message });
 
     return res.json({ contents: data });
 
@@ -307,6 +366,7 @@ export const listContent = async (req, res) => {
 };
 
 
+
 /* ============================================================================
    DELETE CONTENT
    DELETE /api/admin/content/:type/:id
@@ -314,7 +374,8 @@ export const listContent = async (req, res) => {
 export const deleteContent = async (req, res) => {
   try {
     const { type, id } = req.params;
-const rawType = type.toLowerCase();
+const rawType = String(type || "").toLowerCase().trim();
+
 
 const table =
   ["book", "ebook", "ebooks"].includes(rawType)
@@ -375,6 +436,7 @@ console.log("🧨 Deleting from table:", table, "ID:", id);
 /* ============================================================================
    EDIT CONTENT
 ============================================================================ */
+
 export const editContent = async (req, res) => {
   try {
     const { type, id } = req.params;
@@ -389,13 +451,15 @@ export const editContent = async (req, res) => {
         ? "mock_tests"
         : null;
 
-    if (!table)
+    if (!table) {
       return res.status(400).json({ error: "Invalid type" });
+    }
 
     const updates = {};
+
     const allowedFields = {
-      ebooks: ["title", "author", "category", "description", "price", "status"],
-      notes: ["title", "author", "category", "description", "price", "featured"],
+      ebooks: ["title", "author", "description", "price", "status"],
+      notes: ["title", "author", "description", "price", "featured"],
       mock_tests: [
         "title",
         "subject",
@@ -403,35 +467,58 @@ export const editContent = async (req, res) => {
         "total_questions",
         "duration_minutes",
         "start_time",
-        "description"
+        "description",
       ],
     };
 
+    /* ================= CATEGORY UPDATE (AUTO CREATE) ================= */
+    if (req.body.category && table !== "mock_tests") {
+      const cleanCategory = req.body.category.trim();
+      const slug = slugify(cleanCategory);
+
+      let { data: category } = await supabaseAdmin
+        .from("categories")
+        .select("id")
+        .eq("slug", slug)
+        .single();
+
+      if (!category) {
+        const { data: newCat, error } = await supabaseAdmin
+          .from("categories")
+          .insert({ name: cleanCategory, slug })
+          .select()
+          .single();
+
+        if (error) {
+          return res
+            .status(400)
+            .json({ error: "Failed to create category" });
+        }
+
+        category = newCat;
+      }
+
+      updates.category_id = category.id;
+    }
+
+    /* ================= NORMAL FIELD UPDATES ================= */
     for (const key of allowedFields[table]) {
-      if (req.body[key] !== undefined) {
-        updates[key] = req.body[key];
+      if (req.body[key] !== undefined && req.body[key] !== "") {
+        updates[key] =
+          key === "price" ? Number(req.body[key]) : req.body[key];
       }
     }
 
-    if (updates.price !== undefined) {
-      updates.price = Number(updates.price);
-    }
-
-    Object.keys(updates).forEach((k) => {
-      if (updates[k] === "") delete updates[k];
-    });
-
+    /* ================= FILE UPLOAD ================= */
     const file = req.files?.file?.[0];
     const cover = req.files?.cover?.[0];
 
     if (file) {
       const filePath = `${Date.now()}-${file.originalname}`;
 
-      await supabaseAdmin.storage
-        .from(table)
-        .upload(filePath, file.buffer, {
-          contentType: file.mimetype,
-        });
+      await supabaseAdmin.storage.from(table).upload(filePath, file.buffer, {
+        contentType: file.mimetype,
+      });
 
       const { data } = supabaseAdmin.storage
         .from(table)
@@ -460,6 +547,12 @@ export const editContent = async (req, res) => {
       updates.cover_url = data?.publicUrl;
     }
 
+    /* ================= NOTHING TO UPDATE ================= */
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: "No fields to update" });
+    }
+
+    /* ================= DB UPDATE ================= */
     const { data, error } = await supabaseAdmin
       .from(table)
       .update(updates)
@@ -467,16 +560,18 @@ export const editContent = async (req, res) => {
       .select()
       .single();
 
-    if (error)
+    if (error) {
       return res.status(400).json({ error: error.message });
+    }
 
-    res.json({ message: "Content updated", data });
+    return res.json({ message: "Content updated", data });
 
   } catch (err) {
     console.error("editContent error:", err);
-    res.status(500).json({ error: "Server error editing content" });
+    return res.status(500).json({ error: "Server error editing content" });
   }
 };
+
 
 
 

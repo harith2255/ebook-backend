@@ -140,9 +140,11 @@ export async function getExam(req, res) {
 export async function attendExam(req, res) {
   try {
     const examId = Number(req.params.id);
-    const user = req.user;
+    const userId = req.user?.sub;
 
-    if (!user) return res.status(401).json({ error: "Unauthorized" });
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
 
     const { data: exam, error: examErr } = await supabaseAdmin
       .from("exams")
@@ -152,8 +154,9 @@ export async function attendExam(req, res) {
 
     if (examErr || !exam) throw examErr;
 
-    if (!isUnlocked(exam))
+    if (!isUnlocked(exam)) {
       return res.status(403).json({ error: "Exam not unlocked or closed" });
+    }
 
     let answer_file_path = null;
     let answer_file_name = null;
@@ -176,15 +179,13 @@ export async function attendExam(req, res) {
 
     const { data, error } = await supabaseAdmin
       .from("submissions")
-      .insert([
-        {
-          exam_id: examId,
-          user_id: user.id,
-          answer_text: req.body.answer_text || null,
-          answer_file_path,
-          answer_file_name,
-        },
-      ])
+      .insert({
+        exam_id: examId,
+        user_id: userId, // ✅ FIXED
+        answer_text: req.body.answer_text || null,
+        answer_file_path,
+        answer_file_name,
+      })
       .select()
       .single();
 
@@ -197,16 +198,19 @@ export async function attendExam(req, res) {
   }
 }
 
+
 /* -------------------- USER: MY SUBMISSIONS -------------------- */
 export async function getUserSubmissions(req, res) {
   try {
-    const user = req.user;
-    if (!user) return res.status(401).json({ error: "Unauthorized" });
+    const userId = req.user?.sub;
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
 
     const { data, error } = await supabaseAdmin
       .from("submissions")
-      .select(
-        `
+      .select(`
         id,
         exam_id,
         answer_text,
@@ -216,9 +220,8 @@ export async function getUserSubmissions(req, res) {
         score,
         admin_message,
         exams ( title, file_name )
-      `
-      )
-      .eq("user_id", user.id)
+      `)
+      .eq("user_id", userId) // ✅ FIXED
       .order("submitted_at", { ascending: false });
 
     if (error) throw error;
@@ -249,6 +252,7 @@ export async function getUserSubmissions(req, res) {
     res.status(500).json({ error: err.message });
   }
 }
+
 
 /* -------------------- USER SAFE FOLDERS -------------------- */
 
@@ -320,7 +324,8 @@ export async function getFoldersForUser(req, res) {
                 // still only expose URL to users when unlocked
                 if (unlocked) {
                   const { data: signed } = await supabaseAdmin.storage
-                    .from(EXAM_BUCKET)
+                  .from(EXAMS_BUCKET)
+
                     .createSignedUrl(e.file_path, 300);
                   url = signed?.signedUrl ?? null;
                   console.debug(`Exam signed url for exam ${e.id}:`, url);

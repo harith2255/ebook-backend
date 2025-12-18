@@ -10,17 +10,29 @@ export const getAllBooks = async (req, res) => {
 
     let query = supabase
       .from("ebooks")
-      .select("*")
+      .select(`
+        *,
+        categories:category_id (
+          id,
+          name,
+          slug
+        )
+      `)
       .order("created_at", { ascending: false });
 
+    // ✅ Category filter (relation-safe)
     if (category && category !== "All") {
-      query = query.eq("category", category);
+      query = query.eq("categories.name", category);
     }
 
+    // ✅ Search
     if (search) {
-      query = query.or(`title.ilike.%${search}%,author.ilike.%${search}%`);
+      query = query.or(
+        `title.ilike.%${search}%,author.ilike.%${search}%`
+      );
     }
 
+    // ✅ Sort
     if (sort === "popular") {
       query = query.order("sales", { ascending: false });
     }
@@ -28,12 +40,14 @@ export const getAllBooks = async (req, res) => {
     const { data, error } = await query;
     if (error) throw error;
 
-    res.json(data);
+    res.json({ contents: data });
   } catch (err) {
     console.error("getAllBooks error:", err);
     res.status(500).json({ error: err.message });
   }
 };
+
+
 
 /* ============================
    GET BOOK BY ID
@@ -44,19 +58,27 @@ export const getBookById = async (req, res) => {
 
     const { data: book, error } = await supabase
       .from("ebooks")
-      .select("*")
+      .select(`
+        *,
+        categories (
+          id,
+          name,
+          slug
+        )
+      `)
       .eq("id", id)
       .single();
 
     if (error) throw error;
     if (!book) return res.status(404).json({ error: "Book not found" });
 
-    res.json({book});
+    res.json({ book });
   } catch (err) {
     console.error("getBookById error:", err);
     res.status(404).json({ error: "Book not found" });
   }
 };
+
 
 /* ============================
    SEARCH BOOKS BY NAME
@@ -64,20 +86,29 @@ export const getBookById = async (req, res) => {
 export const searchBooksByName = async (req, res) => {
   try {
     const { name } = req.query;
-    if (!name) return res.status(400).json({ error: "Book name query required" });
+    if (!name)
+      return res.status(400).json({ error: "Book name query required" });
 
     const { data, error } = await supabase
       .from("ebooks")
-      .select("*")
+      .select(`
+        *,
+        categories (
+          id,
+          name,
+          slug
+        )
+      `)
       .ilike("title", `%${name}%`);
 
     if (error) throw error;
-    res.json(data);
+    res.json({ contents: data });
   } catch (err) {
     console.error("Error searching books:", err.message);
     res.status(500).json({ error: "Failed to search books" });
   }
 };
+
 
 /* ============================
    GET USER'S LIBRARY
@@ -90,7 +121,14 @@ export const getUserLibrary = async (req, res) => {
       .from("user_library")
       .select(`
         *,
-        book:ebooks(*)
+        book:ebooks (
+          *,
+          categories (
+            id,
+            name,
+            slug
+          )
+        )
       `)
       .eq("user_id", userId)
       .order("added_at", { ascending: false });
@@ -103,6 +141,7 @@ export const getUserLibrary = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
 
 /* ============================
    UPDATE READING PROGRESS
