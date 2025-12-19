@@ -8,10 +8,6 @@ export const verifySupabaseAuth = {
   required: async (req, res, next) => {
     try {
       const authHeader = req.headers.authorization;
-console.log("AUTH CHECK:", {
-  path: req.path,
-  token: !!req.headers.authorization,
-});
 
       if (!authHeader?.startsWith("Bearer ")) {
         console.warn("❌ Missing Authorization header");
@@ -60,6 +56,11 @@ console.log("AUTH CHECK:", {
           return res.status(500).json({ error: "Profile setup failed" });
         }
       }
+await supabaseAdmin
+  .from("user_sessions")
+  .update({ last_active: new Date().toISOString() })
+  .eq("user_id", req.user.id)
+  .eq("active", true);
 
       // 3️⃣ Suspension check
       if (profile?.account_status === "suspended" && req.method !== "GET") {
@@ -68,7 +69,6 @@ console.log("AUTH CHECK:", {
           error: "Account suspended. Read-only access enabled.",
         });
       }
-
       next();
     } catch (err) {
       console.error("🔥 Auth middleware crash:", err);

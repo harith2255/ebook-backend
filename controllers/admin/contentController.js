@@ -186,24 +186,25 @@ if (rawCategory) {
       };
     }
 
-    if (table === "notes") {
-      insertObj = {
-        title,
-        category_id: categoryId,
-        author,
-        pages: pageCount,
-        downloads: 0,
-        rating: 0,
-        price: price || 0,
-        featured: false,
-        file_url: publicUrl,
-        cover_url: coverUrl,
-        preview_content: "",
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        description,
-      };
-    }
+   if (table === "notes") {
+  insertObj = {
+    title,
+    category: rawCategory?.trim() || null, // ✅ FIX
+    author,
+    pages: pageCount,
+    downloads: 0,
+    rating: 0,
+    price: price || 0,
+    featured: false,
+    file_url: publicUrl,
+    cover_url: coverUrl,
+    preview_content: "",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    description,
+  };
+}
+
 
     if (table === "mock_tests") {
       // EXTRA VALIDATION FOR MOCK TESTS
@@ -263,7 +264,6 @@ if (rawCategory) {
       return res.status(400).json({ error: insertError.message });
     }
 
-    /* ==================== INSERT MCQs (for Mock Test) ==================== */
     /* ==================== INSERT MCQs (for Mock Test) ==================== */
 if (rawType === "Mock Test" && Array.isArray(mcqs) && mcqs.length > 0) {
   const testId = insertData.id;
@@ -343,21 +343,34 @@ export const listContent = async (req, res) => {
     }
 
     // ✅ BOOKS + NOTES (JOIN categories)
-    const { data, error } = await supabaseAdmin
-      .from(table)
-      .select(`
-        *,
-        categories (
-          id,
-          name,
-          slug
-        )
-      `)
-      .order("created_at", { ascending: false });
+    // ✅ BOOKS (JOIN categories)
+if (table === "ebooks") {
+  const { data, error } = await supabaseAdmin
+    .from("ebooks")
+    .select(`
+      *,
+      categories (
+        id,
+        name,
+        slug
+      )
+    `)
+    .order("created_at", { ascending: false });
 
-    if (error) return res.status(400).json({ error: error.message });
+  if (error) return res.status(400).json({ error: error.message });
+  return res.json({ contents: data });
+}
 
-    return res.json({ contents: data });
+// ✅ NOTES (NO JOIN)
+if (table === "notes") {
+  const { data, error } = await supabaseAdmin
+    .from("notes")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) return res.status(400).json({ error: error.message });
+  return res.json({ contents: data });
+}
 
   } catch (err) {
     console.error("List error:", err);
@@ -472,34 +485,45 @@ export const editContent = async (req, res) => {
     };
 
     /* ================= CATEGORY UPDATE (AUTO CREATE) ================= */
-    if (req.body.category && table !== "mock_tests") {
-      const cleanCategory = req.body.category.trim();
-      const slug = slugify(cleanCategory);
+   /* ================= CATEGORY UPDATE ================= */
+if (req.body.category && table !== "mock_tests") {
 
-      let { data: category } = await supabaseAdmin
+  // ✅ E-BOOKS → category_id (FK)
+  if (table === "ebooks") {
+    const cleanCategory = req.body.category.trim();
+    const slug = slugify(cleanCategory);
+
+    let { data: category } = await supabaseAdmin
+      .from("categories")
+      .select("id")
+      .eq("slug", slug)
+      .single();
+
+    if (!category) {
+      const { data: newCat, error } = await supabaseAdmin
         .from("categories")
-        .select("id")
-        .eq("slug", slug)
+        .insert({ name: cleanCategory, slug })
+        .select()
         .single();
 
-      if (!category) {
-        const { data: newCat, error } = await supabaseAdmin
-          .from("categories")
-          .insert({ name: cleanCategory, slug })
-          .select()
-          .single();
-
-        if (error) {
-          return res
-            .status(400)
-            .json({ error: "Failed to create category" });
-        }
-
-        category = newCat;
+      if (error) {
+        return res
+          .status(400)
+          .json({ error: "Failed to create category" });
       }
 
-      updates.category_id = category.id;
+      category = newCat;
     }
+
+    updates.category_id = category.id;
+  }
+
+  // ✅ NOTES → plain text category
+  if (table === "notes") {
+    updates.category = req.body.category.trim();
+  }
+}
+
 
     /* ================= NORMAL FIELD UPDATES ================= */
     for (const key of allowedFields[table]) {

@@ -123,6 +123,20 @@ export async function login(req, res) {
     if (role === "User") {
       await logActivity(userId, fullName, "logged in", "login");
     }
+// ✅ CREATE USER SESSION
+const { data: sessionRow, error: sessionErr } =
+  await supabaseAdmin.from("user_sessions").insert({
+    user_id: userId,
+    device: req.headers["sec-ch-ua-platform"] || "Unknown",
+    location: req.ip || "Unknown",
+    user_agent: req.headers["user-agent"],
+    active: true,
+    last_active: new Date().toISOString(),
+  }).select().single();
+
+if (sessionErr) {
+  console.error("Session create error:", sessionErr);
+}
 
     // DRM login log
     await supabaseAdmin.from("drm_access_logs").insert({
@@ -147,6 +161,7 @@ export async function login(req, res) {
       },
       access_token: accessToken,
       refresh_token: loginData.session.refresh_token,
+       session_id: sessionRow?.id,
     });
   } catch (err) {
     console.error("Login error:", err);
@@ -185,6 +200,18 @@ export async function logout(req, res) {
         "login"
       );
     }
+const sessionId = req.headers["x-session-id"];
+
+if (sessionId) {
+  await supabaseAdmin
+    .from("user_sessions")
+    .update({
+      active: false,
+      last_active: new Date().toISOString(),
+    })
+    .eq("id", sessionId)
+    .eq("user_id", req.user.id);
+}
 
     // DRM log
     await supabaseAdmin.from("drm_access_logs").insert({

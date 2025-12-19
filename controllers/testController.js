@@ -64,17 +64,7 @@ export const startTest = async (req, res) => {
       return res.status(400).json({ error: insertErr.message });
     }
 
-    // 6. Increment participants only if first attempt
-  // 6. Increment participants only if first attempt
-if (!priorAttempt) {
-  const { error: incErr } = await supabase.rpc("increment_participants", {
-    test_id_input: Number(test_id),
-  });
 
-  if (incErr) {
-    console.warn("increment_participants error:", incErr.message);
-  }
-}
 
 
     return res.json({ attempt });
@@ -282,10 +272,26 @@ export const finishTest = async (req, res) => {
       })
       .eq("id", attempt_id);
 
+      // 2. Recalculate study time AFTER completion
+const totalStudyTime = await recalculateStudyTime(user_id);
+
+await supabase
+  .from("user_stats")
+  .update({
+    total_study_time: totalStudyTime
+  })
+  .eq("user_id", user_id);
+
     // async analytics
-    updateUserStats(user_id, percentScore, timeSpent).catch(() => {});
-    updateLeaderboard(user_id).catch(() => {});
-    updateRanks().catch(() => {});
+// async analytics (ORDER MATTERS)
+await updateTestRanks(attempt.test_id);
+await updateTestPercentiles(attempt.test_id);
+await updateUserBestRank(user_id);
+
+updateLeaderboard(user_id).catch(() => {});
+updateUserStats(user_id, percentScore, timeSpent).catch(() => {});
+
+    
 
     return res.json({
       success: true,
@@ -398,50 +404,112 @@ async function updateUserStats(user_id, newScore, timeSpent) {
       (stats.average_score * stats.tests_taken + newScore) / totalTests
     );
 
-  await supabase
-    .from("user_stats")
-    .update({
-      tests_taken: totalTests,
-      average_score: avgScore,
-      total_study_time: stats.total_study_time + timeSpent,
-    })
-    .eq("user_id", user_id);
+await supabase
+  .from("user_stats")
+  .update({
+    tests_taken: totalTests,
+    average_score: avgScore,
+  })
+  .eq("user_id", user_id);
+
+}
+async function recalculateStudyTime(user_id) {
+  const { data: attempts } = await supabase
+    .from("mock_attempts")
+    .select("test_id, time_spent, score")
+    .eq("user_id", user_id)
+    .eq("status", "completed")
+    .order("score", { ascending: false });
+
+  if (!attempts) return 0;
+
+  const seen = new Set();
+  let total = 0;
+
+  for (const a of attempts) {
+    if (!seen.has(a.test_id)) {
+      seen.add(a.test_id);
+      total += a.time_spent || 0;
+    }
+  }
+
+  return total;
 }
 
-/* ==========================================================
-   UPDATE RANKS (GLOBAL)
-========================================================== */
-async function updateRanks() {
- const { data: board } = await supabase
-  .from("mock_leaderboard")
-  .select(`
-    user_id,
-    average_score,
-    profiles (status)
-  `)
-  .order("average_score", { ascending: false });
+async function getBestAttemptsForTest(test_id) {
+  const { data } = await supabase
+    .from("mock_attempts")
+    .select("id, user_id, score, time_spent, rank")
+    .eq("test_id", test_id)
+    .eq("status", "completed")
+    .order("score", { ascending: false })
+    .order("time_spent", { ascending: true });
 
-  if (!board) return;
+  if (!data) return [];
 
-  const updates = board.map((row, i) => ({
-    user_id: row.user_id,
-    best_rank: i + 1,
-  }));
+  const seen = new Set();
+  const best = [];
 
-  // bulk update
-  for (const u of updates) {
-    await supabase
-      .from("mock_leaderboard")
-      .update({ best_rank: u.best_rank })
-      .eq("user_id", u.user_id);
+  for (const a of data) {
+    if (!seen.has(a.user_id)) {
+      seen.add(a.user_id);
+      best.push(a);
+    }
   }
 
-  // update attempts ranks
-  for (const u of updates) {
+  return best;
+}
+
+async function updateTestRanks(test_id) {
+  const attempts = await getBestAttemptsForTest(test_id);
+  if (!attempts.length) return;
+
+  let rank = 1;
+
+  for (let i = 0; i < attempts.length; i++) {
+    if (
+      i > 0 &&
+      attempts[i].score < attempts[i - 1].score
+    ) {
+      rank = i + 1;
+    }
+
     await supabase
       .from("mock_attempts")
-      .update({ rank: u.best_rank })
-      .eq("user_id", u.user_id)
-      .eq("status", "completed");
+      .update({ rank })
+      .eq("id", attempts[i].id);
   }
+}
+async function updateTestPercentiles(test_id) {
+  const attempts = await getBestAttemptsForTest(test_id);
+  if (!attempts.length) return;
+
+  const total = attempts.length;
+
+  for (const a of attempts) {
+    const below = total - a.rank;
+    const percentile = Math.round((below / total) * 100);
+
+    await supabase
+      .from("mock_attempts")
+      .update({ percentile })
+      .eq("id", a.id);
+  }
+}
+async function updateUserBestRank(user_id) {
+  const { data } = await supabase
+    .from("mock_attempts")
+    .select("rank")
+    .eq("user_id", user_id)
+    .eq("status", "completed")
+    .not("rank", "is", null);
+
+  if (!data || !data.length) return;
+
+  const bestRank = Math.min(...data.map(r => r.rank));
+
+  await supabase
+    .from("user_stats")
+    .update({ best_rank: bestRank })
+    .eq("user_id", user_id);
 }

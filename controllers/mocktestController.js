@@ -14,19 +14,35 @@ export const getAvailableTests = async (req, res) => {
         difficulty,
         duration_minutes,
         total_questions,
-        participants,
-        start_time
+        start_time,
+        mock_attempts(user_id)
       `)
       .order("start_time", { ascending: true });
 
-    if (error) return res.status(400).json({ error: error.message });
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
 
-    return res.json(data || []);
+    const result = (data || []).map(t => ({
+      id: t.id,
+      title: t.title,
+      subject: t.subject,
+      difficulty: t.difficulty,
+      duration_minutes: t.duration_minutes,
+      total_questions: t.total_questions,
+      start_time: t.start_time,
+      participants: new Set(
+        (t.mock_attempts || []).map(a => a.user_id)
+      ).size,
+    }));
+
+    return res.json(result);
   } catch (err) {
-    console.error(err);
+    console.error("getAvailableTests error:", err);
     return res.status(500).json({ error: "Failed to fetch tests" });
   }
 };
+
 
 
 /* ======================================================
@@ -138,20 +154,20 @@ export const getCompletedTests = async (req, res) => {
 
     const { data, error } = await supabase
       .from("mock_attempts")
-      .select(`
-        id,
-        test_id,
-        score,
-        rank,
-        time_spent,
-        completed_at,
-        mock_tests (
-          title,
-          subject,
-          duration_minutes,
-          participants
-        )
-      `)
+   .select(`
+  id,
+  test_id,
+  score,
+  rank,
+  percentile,
+  completed_at,
+  mock_tests (
+    title,
+    subject,
+    participants
+  )
+`)
+
       .eq("user_id", userId)
       .eq("status", "completed")
       .order("completed_at", { ascending: false });
@@ -250,13 +266,16 @@ export const getStats = async (req, res) => {
 
     const { data, error } = await supabase
       .from("mock_attempts")
-      .select("score, rank, time_spent")
+      .select(`
+        score,
+        rank,
+        time_spent,
+        mock_tests!inner(id)
+      `)
       .eq("user_id", userId)
       .eq("status", "completed");
 
-    if (error) return res.status(400).json({ error: error.message });
-
-    if (!data?.length) {
+    if (error || !data?.length) {
       return res.json({
         tests_taken: 0,
         average_score: 0,
@@ -265,14 +284,20 @@ export const getStats = async (req, res) => {
       });
     }
 
-    const scores = data.map(x => Number(x.score) || 0);
-    const ranks = data.map(x => x.rank).filter(r => typeof r === "number");
-    const time = data.map(x => Number(x.time_spent) || 0);
-
     const tests_taken = data.length;
-    const average_score = Math.round(scores.reduce((a, b) => a + b, 0) / tests_taken);
-    const best_rank = ranks.length ? Math.min(...ranks) : null;
-    const total_study_time = time.reduce((a, b) => a + b, 0);
+
+    const average_score = Math.round(
+      data.reduce((s, a) => s + (a.score || 0), 0) / tests_taken
+    );
+
+    const best_rank =
+      Math.min(...data.map(a => a.rank).filter(r => typeof r === "number")) ||
+      null;
+
+    const total_study_time = data.reduce(
+      (s, a) => s + (a.time_spent || 0),
+      0
+    );
 
     return res.json({
       tests_taken,
@@ -281,7 +306,8 @@ export const getStats = async (req, res) => {
       total_study_time,
     });
   } catch (err) {
-    console.error(err);
+    console.error("getStats error:", err);
     return res.status(500).json({ error: "Failed to fetch stats" });
   }
 };
+
