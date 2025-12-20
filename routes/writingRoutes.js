@@ -9,7 +9,10 @@ import {
   getFeedbackForOrder,
   uploadUserAttachment,
   getSingleWritingOrder,
-  verifyWritingPayment
+  verifyWritingPayment,
+  getInterviewMaterials,
+  getInterviewMaterialById,
+ 
 } from "../controllers/writingController.js";
 
 import { verifySupabaseAuth } from "../middleware/authMiddleware.js";
@@ -30,6 +33,14 @@ router.post("/order", createWritingOrder);              // Step 2: create final 
 
 router.get("/orders/active", getActiveOrders);
 router.get("/orders/completed", getCompletedOrders);
+
+/* ===========================
+   USER ROUTES
+=========================== */
+router.get("/", getInterviewMaterials);
+router.get("/:id", getInterviewMaterialById);
+
+
 router.put("/orders/:id", updateOrder);
 
 router.post("/feedback", sendFeedback);

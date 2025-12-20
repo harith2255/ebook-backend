@@ -8,6 +8,11 @@ import {
   adminReply,
   uploadWritingFile,
   markAsRead,
+  getInterviewMaterials,
+  createInterviewMaterial,
+  updateInterviewMaterial,
+  deleteInterviewMaterial,
+  uploadInterviewFile,
 
 } from "../../controllers/admin/adminWritingServiceController.js";
 
@@ -70,5 +75,47 @@ router.post(
   adminOnly,
   adminReply
 );
+
+
+/* ================================
+   INTERVIEW MATERIALS (ADMIN)
+================================ */
+
+router.get(
+  "/interview-materials",
+  verifySupabaseAuth.required,
+  adminOnly,
+  getInterviewMaterials
+);
+
+router.post(
+  "/interview-materials",
+  verifySupabaseAuth.required,
+  adminOnly,
+  createInterviewMaterial
+);
+
+router.put(
+  "/interview-materials/:id",
+  verifySupabaseAuth.required,
+  adminOnly,
+  updateInterviewMaterial
+);
+
+router.delete(
+  "/interview-materials/:id",
+  verifySupabaseAuth.required,
+  adminOnly,
+  deleteInterviewMaterial
+);
+
+router.post(
+  "/interview-materials/upload",
+  verifySupabaseAuth.required,
+  adminOnly,
+  upload.single("file"),
+  uploadInterviewFile
+);
+
 
 export default router;

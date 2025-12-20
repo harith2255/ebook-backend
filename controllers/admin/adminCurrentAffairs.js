@@ -141,3 +141,51 @@ export const deleteArticle = async (req, res) => {
     res.status(500).json({ error: "Failed to delete article" });
   }
 };
+/* -------------------------
+   DELETE CATEGORY (FOLDER)
+------------------------- */
+export const deleteCategory = async (req, res) => {
+  try {
+    const { category } = req.params;
+
+    if (!category) {
+      return res.status(400).json({ error: "Category required" });
+    }
+
+    // 1️⃣ Get image paths for cleanup
+    const { data: articles, error: fetchErr } = await supabaseAdmin
+      .from("current_affairs")
+      .select("image_path")
+      .eq("category", category);
+
+    if (fetchErr) throw fetchErr;
+
+    // 2️⃣ Remove images from storage
+    const paths = articles
+      ?.map(a => a.image_path)
+      .filter(Boolean);
+
+    if (paths.length > 0) {
+      await supabaseAdmin
+        .storage
+        .from("current-affairs")
+        .remove(paths);
+    }
+
+    // 3️⃣ Delete all articles in category
+    const { error } = await supabaseAdmin
+      .from("current_affairs")
+      .delete()
+      .eq("category", category);
+
+    if (error) throw error;
+
+    res.json({
+      success: true,
+      message: `Category "${category}" deleted successfully`,
+    });
+  } catch (err) {
+    console.error("DELETE CATEGORY ERROR:", err);
+    res.status(500).json({ error: "Failed to delete category" });
+  }
+};

@@ -406,3 +406,68 @@ export const verifyWritingPayment = async (req, res) => {
 
 
 
+/* =====================================================
+   GET ALL INTERVIEW MATERIALS
+===================================================== */
+export const getInterviewMaterials = async (req, res) => {
+  try {
+    const { category, search } = req.query;
+
+    let query = supabase
+      .from("interview_materials")
+      .select("id, title, category, file_url")
+      .eq("is_active", true);
+
+    if (category && category !== "All") {
+      query = query.eq("category", category);
+    }
+
+    if (search) {
+      query = query.ilike("title", `%${search}%`);
+    }
+
+    const { data, error } = await query.order("created_at", {
+      ascending: false,
+    });
+
+    if (error) {
+      console.error("getInterviewMaterials error:", error);
+      return res.status(400).json({ error: error.message });
+    }
+
+    return res.json(data || []);
+  } catch (err) {
+    console.error("getInterviewMaterials server error:", err);
+    return res.status(500).json({ error: "Failed to load materials" });
+  }
+};
+
+/* =====================================================
+   GET SINGLE MATERIAL
+===================================================== */
+export const getInterviewMaterialById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { data, error } = await supabase
+      .from("interview_materials")
+      .select("*")
+      .eq("id", id)
+      .eq("is_active", true)
+      .single();
+
+    if (error || !data) {
+      return res.status(404).json({ error: "Material not found" });
+    }
+
+    return res.json(data);
+  } catch (err) {
+    console.error("getInterviewMaterialById error:", err);
+    return res.status(500).json({ error: "Failed to load material" });
+  }
+};
+
+
+
+
+

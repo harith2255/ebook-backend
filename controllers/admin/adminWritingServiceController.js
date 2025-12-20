@@ -271,3 +271,124 @@ export const uploadWritingFile = async (req, res) => {
     return res.status(500).json({ error: "File upload failed" });
   }
 };
+/* ============================================================
+   ADMIN: GET ALL INTERVIEW MATERIALS
+=============================================================== */
+export const getInterviewMaterials = async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("interview_materials")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    return res.json(data);
+  } catch (err) {
+    console.error("getInterviewMaterials Error:", err);
+    return res.status(500).json({ error: "Failed to load interview materials" });
+  }
+};
+/* ============================================================
+   ADMIN: CREATE INTERVIEW MATERIAL
+=============================================================== */
+export const createInterviewMaterial = async (req, res) => {
+  try {
+    const { title, category, description, file_url } = req.body;
+
+    if (!title || !category || !file_url) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const { error } = await supabase
+      .from("interview_materials")
+      .insert({
+        title,
+        category,
+        description,
+        file_url,
+        created_at: new Date().toISOString(),
+      });
+
+    if (error) throw error;
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("createInterviewMaterial Error:", err);
+    return res.status(500).json({ error: "Failed to create material" });
+  }
+};
+/* ============================================================
+   ADMIN: UPDATE INTERVIEW MATERIAL
+=============================================================== */
+export const updateInterviewMaterial = async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { title, category, description, file_url } = req.body;
+
+    const { error } = await supabase
+      .from("interview_materials")
+      .update({
+        title,
+        category,
+        description,
+        file_url,
+      })
+      .eq("id", id);
+
+    if (error) throw error;
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("updateInterviewMaterial Error:", err);
+    return res.status(500).json({ error: "Failed to update material" });
+  }
+};
+/* ============================================================
+   ADMIN: DELETE INTERVIEW MATERIAL
+=============================================================== */
+export const deleteInterviewMaterial = async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    const { error } = await supabase
+      .from("interview_materials")
+      .delete()
+      .eq("id", id);
+
+    if (error) throw error;
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("deleteInterviewMaterial Error:", err);
+    return res.status(500).json({ error: "Failed to delete material" });
+  }
+};
+/* ============================================================
+   ADMIN: UPLOAD INTERVIEW MATERIAL FILE
+=============================================================== */
+export const uploadInterviewFile = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "File not provided" });
+    }
+
+    const file = req.file;
+    const fileName = `interview-${Date.now()}-${file.originalname}`;
+
+    const { error } = await supabase.storage
+      .from("interview_materials")
+      .upload(fileName, file.buffer);
+
+    if (error) throw error;
+
+    const { publicUrl } = supabase.storage
+      .from("interview_materials")
+      .getPublicUrl(fileName).data;
+
+    return res.json({ url: publicUrl });
+  } catch (err) {
+    console.error("uploadInterviewFile Error:", err);
+    return res.status(500).json({ error: "File upload failed" });
+  }
+};
