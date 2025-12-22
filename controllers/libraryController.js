@@ -654,15 +654,16 @@ export const saveHighlight = async (req, res) => {
   try {
     const userId = req.user.id;
     const {
-      book_id,
-      page,
-      x_pct,
-      y_pct,
-      w_pct,
-      h_pct,
-      color = "rgba(255,255,0,0.35)",
-      note = "",
-    } = req.body;
+  book_id,
+  page,
+  xPct,
+  yPct,
+  wPct,
+  hPct,
+  color = "rgba(255,255,0,0.35)",
+  note = "",
+} = req.body;
+
 
     const { data, error } = await supabase
       .from("highlights")
@@ -671,10 +672,11 @@ export const saveHighlight = async (req, res) => {
           user_id: userId,
           book_id,
           page,
-          x: x_pct,
-          y: y_pct,
-          width: w_pct,
-          height: h_pct,
+          x: xPct,
+y: yPct,
+width: wPct,
+height: hPct,
+
           color,
           text: note,
         },
@@ -684,7 +686,17 @@ export const saveHighlight = async (req, res) => {
 
     if (error) return res.status(400).json({ error: error.message });
 
-    res.json(data);
+   res.json({
+  id: data.id,
+  page: data.page,
+  color: data.color,
+  text: data.text,
+  xPct: data.x,
+  yPct: data.y,
+  wPct: data.width,
+  hPct: data.height,
+});
+
   } catch (err) {
     console.error("saveHighlight error:", err);
     res.status(500).json({ error: "Failed to save highlight" });
