@@ -462,6 +462,52 @@ export const getInterviewMaterialById = async (req, res) => {
   }
 };
 
+/* =====================================================
+   STREAM INTERVIEW MATERIAL PDF (FOR PDFJS)
+===================================================== */
+export const streamInterviewMaterialPdf = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // 1️⃣ Get material record
+    const { data, error } = await supabase
+      .from("interview_materials")
+      .select("file_url")
+      .eq("id", id)
+      .eq("is_active", true)
+      .single();
+
+    if (error || !data?.file_url) {
+      return res.status(404).json({ error: "Material not found" });
+    }
+
+    // 2️⃣ Download file from Supabase storage
+    const { data: file, error: fileError } =
+      await supabaseAdmin.storage
+        .from("interview-materials") // 👈 bucket name
+        .download(data.file_url);
+
+    if (fileError || !file) {
+      return res.status(404).json({ error: "File not found" });
+    }
+
+    // 3️⃣ Convert to buffer
+    const buffer = Buffer.from(await file.arrayBuffer());
+
+    // 4️⃣ VERY IMPORTANT HEADERS
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", "inline");
+    res.setHeader("Cache-Control", "no-store");
+
+    // 5️⃣ Send RAW PDF BYTES
+    return res.end(buffer);
+
+  } catch (err) {
+    console.error("streamInterviewMaterialPdf error:", err);
+    return res.status(500).json({ error: "Failed to stream PDF" });
+  }
+};
+
 
 
 

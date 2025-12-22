@@ -2,7 +2,7 @@ import supabase from "../utils/supabaseClient.js"; // anon
 import { supabaseAdmin } from "../utils/supabaseClient.js"; // service role
 
 import { logActivity } from "../utils/activityLogger.js";
-
+import crypto from "crypto";
 export async function register(req, res) {
   try {
     const { first_name, last_name, email, password } = req.body;
@@ -123,19 +123,44 @@ export async function login(req, res) {
     if (role === "User") {
       await logActivity(userId, fullName, "logged in", "login");
     }
-// ✅ CREATE USER SESSION
+
+const rawDevice = [
+  req.headers["sec-ch-ua-platform"] || "unknown-platform",
+  req.headers["user-agent"] || "unknown-agent",
+  req.ip?.split(":").slice(0, 2).join(":") || "unknown-ip"
+].join("|");
+
+const deviceId = crypto
+  .createHash("sha256")
+  .update(rawDevice)
+  .digest("hex");
+// 🔒 Deactivate other device sessions
+await supabaseAdmin
+  .from("user_sessions")
+  .update({ active: false })
+  .eq("user_id", userId)
+  .neq("device_id", deviceId);
+// ✅ Upsert current session
 const { data: sessionRow, error: sessionErr } =
-  await supabaseAdmin.from("user_sessions").insert({
-    user_id: userId,
-    device: req.headers["sec-ch-ua-platform"] || "Unknown",
-    location: req.ip || "Unknown",
-    user_agent: req.headers["user-agent"],
-    active: true,
-    last_active: new Date().toISOString(),
-  }).select().single();
+  await supabaseAdmin
+    .from("user_sessions")
+    .upsert(
+      {
+        user_id: userId,
+        device_id: deviceId,
+        device: req.headers["sec-ch-ua-platform"] || "Unknown",
+        location: req.ip || "Unknown",
+        user_agent: req.headers["user-agent"],
+        active: !isSuspended,
+        last_active: new Date().toISOString(),
+      },
+      { onConflict: "user_id,device_id" }
+    )
+    .select()
+    .single();
 
 if (sessionErr) {
-  console.error("Session create error:", sessionErr);
+  console.error("Session upsert error:", sessionErr);
 }
 
     // DRM login log
@@ -147,6 +172,17 @@ if (sessionErr) {
       ip_address: req.ip,
       created_at: new Date(),
     });
+    await supabaseAdmin
+  .from("user_preferences")
+  .upsert(
+    {
+      user_id: userId,
+      timezone: "Asia/Kolkata",
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id" }
+  );
+
 
     return res.json({
       message: isSuspended
@@ -163,6 +199,8 @@ if (sessionErr) {
       refresh_token: loginData.session.refresh_token,
        session_id: sessionRow?.id,
     });
+
+    
   } catch (err) {
     console.error("Login error:", err);
     return res.status(500).json({ error: "Internal Server Error" });

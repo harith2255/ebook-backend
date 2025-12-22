@@ -10,9 +10,9 @@ import {
   markAsRead,
   getInterviewMaterials,
   createInterviewMaterial,
-  updateInterviewMaterial,
+ 
   deleteInterviewMaterial,
-  uploadInterviewFile,
+
 
 } from "../../controllers/admin/adminWritingServiceController.js";
 
@@ -92,15 +92,11 @@ router.post(
   "/interview-materials",
   verifySupabaseAuth.required,
   adminOnly,
+  upload.single("file"), // ✅ IMPORTANT
   createInterviewMaterial
 );
 
-router.put(
-  "/interview-materials/:id",
-  verifySupabaseAuth.required,
-  adminOnly,
-  updateInterviewMaterial
-);
+
 
 router.delete(
   "/interview-materials/:id",
@@ -109,13 +105,7 @@ router.delete(
   deleteInterviewMaterial
 );
 
-router.post(
-  "/interview-materials/upload",
-  verifySupabaseAuth.required,
-  adminOnly,
-  upload.single("file"),
-  uploadInterviewFile
-);
+
 
 
 export default router;

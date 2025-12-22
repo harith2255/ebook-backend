@@ -12,6 +12,7 @@ import {
   verifyWritingPayment,
   getInterviewMaterials,
   getInterviewMaterialById,
+  streamInterviewMaterialPdf,
  
 } from "../controllers/writingController.js";
 
@@ -40,6 +41,11 @@ router.get("/orders/completed", getCompletedOrders);
 router.get("/", getInterviewMaterials);
 router.get("/:id", getInterviewMaterialById);
 
+router.get(
+  "/interview-materials/:id/pdf",
+ 
+  streamInterviewMaterialPdf
+);
 
 router.put("/orders/:id", updateOrder);
 
