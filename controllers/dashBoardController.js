@@ -9,6 +9,8 @@ import supabase from "../utils/supabaseClient.js";
  * we use `added_at` when filtering for "books completed this month".
  * This is a limitation — see the migration SQL below to add `completed_at`.
  */
+// Ignore sessions shorter than ~1 minute
+const MIN_SESSION_HOURS = 1 / 60; // 0.0167 hours
 
 
 export async function getDashboardData(req, res) {
@@ -52,55 +54,96 @@ export async function getDashboardData(req, res) {
     // --------------------
     // 3) Tests completed & avg score
     // --------------------
-    const { data: testResults = [], count: testsCompletedCount, error: testsErr } =
-      await supabase
-        .from("test_results")
-        .select("*", { count: "exact" })
-        .eq("user_id", userId);
+ const { data: completedTests = [], error: testsErr } = await supabase
+  .from("mock_attempts")
+  .select("score, completed_at")
+  .eq("user_id", userId)
+  .eq("status", "completed");
 
-    if (testsErr) throw testsErr;
+if (testsErr) throw testsErr;
 
-    const avgScore =
-      testResults.length > 0
-        ? (
-            testResults.reduce((sum, t) => sum + (Number(t.score) || 0), 0) /
-            testResults.length
-          ).toFixed(1)
-        : 0;
+const testsCompletedCount = completedTests.length;
+
+const avgScore =
+  testsCompletedCount > 0
+    ? Number(
+        (
+          completedTests.reduce(
+            (sum, t) => sum + (Number(t.score) || 0),
+            0
+          ) / testsCompletedCount
+        ).toFixed(1)
+      )
+    : 0;
+
+// weekly tests (last 7 days)
+const weekAgo = new Date(Date.now() - 7 * 86400000);
+
+const weeklyTests = completedTests.filter(
+  (t) => new Date(t.completed_at) >= weekAgo
+).length;
 
     // --------------------
     // 4) Study Hours
     // --------------------
     const { data: studySessions = [], error: studyErr } = await supabase
-      .from("study_sessions")
-      .select("duration, created_at")
-      .eq("user_id", userId);
+  .from("study_sessions")
+  .select("duration, created_at")
+  .eq("user_id", userId);
 
-    if (studyErr) throw studyErr;
+if (studyErr) throw studyErr;
 
-    const totalStudyHours = Math.round(
-      (studySessions.reduce((sum, s) => sum + (Number(s.duration) || 0), 0) || 0)
-    );
+// TOTAL HOURS (keep decimals)
+// TOTAL HOURS — accurate & stable
+const totalStudyHoursRaw = studySessions
+  .filter(s => Number(s.duration) >= MIN_SESSION_HOURS)
+  .reduce((sum, s) => sum + Number(s.duration), 0);
 
-    const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+const totalStudyHours = Math.round(totalStudyHoursRaw * 10) / 10;
 
-    const weeklyHours = Math.round(
-      studySessions
-        .filter((s) => s.created_at >= weekAgo)
-        .reduce((sum, s) => sum + (Number(s.duration) || 0), 0) || 0
-    );
+
+// WEEKLY HOURS
+const weekAgoDate = new Date(Date.now() - 7 * 86400000);
+
+const weeklyHoursRaw = studySessions
+  .filter(
+    s =>
+      Number(s.duration) >= MIN_SESSION_HOURS &&
+      new Date(s.created_at) >= weekAgoDate
+  )
+  .reduce((sum, s) => sum + Number(s.duration), 0);
+
+const weeklyHours = Math.round(weeklyHoursRaw * 10) / 10;
+
 
     // --------------------
-    // 5) Active Streak
-    // --------------------
-    const { data: streakData, error: streakErr } = await supabase
-      .from("user_streaks")
-      .select("streak_days")
-      .eq("user_id", userId)
-      .maybeSingle();
+// 5) Active Streak (dynamic)
+// --------------------
+const { data: activityDates, error: activityErr } = await supabase
+  .rpc("get_user_activity_dates", { uid: userId });
 
-    if (streakErr && streakErr.code !== "PGRST116") throw streakErr;
-    const activeStreak = streakData?.streak_days || 0;
+if (activityErr) throw activityErr;
+
+// activityDates = ["2024-09-10", "2024-09-09", "2024-09-08"]
+
+let streak = 0;
+let cursor = new Date();
+cursor.setHours(0, 0, 0, 0);
+
+for (const d of activityDates) {
+  const day = new Date(d);
+  day.setHours(0, 0, 0, 0);
+
+  if (cursor.getTime() === day.getTime()) {
+    streak++;
+    cursor.setDate(cursor.getDate() - 1);
+  } else {
+    break;
+  }
+}
+
+const activeStreak = streak;
+
 
     // --------------------
     // 6) Continue Reading (recent books) — include last_page & progress
@@ -164,30 +207,28 @@ export async function getDashboardData(req, res) {
 }
 
 
-    // --------------------
-    // Final assembled response
-    // --------------------
-    return res.json({
-      user: userData,
-      stats: {
-        booksRead: booksReadCount || 0,
-        booksThisMonth: booksCompletedMonthCount || 0,
-        testsCompleted: testsCompletedCount || 0,
-        avgScore: parseFloat(avgScore) || 0,
-        studyHours: totalStudyHours || 0,
-        weeklyHours: weeklyHours || 0,
-        activeStreak: activeStreak || 0,
-      },
-      recentBooks,
-      weeklyProgress: {
-        books: booksCompletedMonthCount || 0,
-        tests:
-          testResults?.filter(
-            (t) => new Date(t.created_at) >= new Date(weekAgo)
-          ).length || 0,
-        hours: weeklyHours || 0,
-      },
-    });
+ // --------------------
+// Final assembled response
+// --------------------
+return res.json({
+  user: userData,
+  stats: {
+    booksRead: booksReadCount || 0,
+    booksThisMonth: booksCompletedMonthCount || 0,
+    testsCompleted: testsCompletedCount || 0,
+    avgScore: parseFloat(avgScore) || 0,
+    studyHours: totalStudyHours || 0,
+    weeklyHours: weeklyHours || 0,
+    activeStreak: activeStreak || 0,
+  },
+  recentBooks,
+  weeklyProgress: {
+    books: booksCompletedMonthCount || 0,
+    tests: weeklyTests || 0,
+    hours: weeklyHours || 0,
+  },
+});
+
   } catch (err) {
     console.error("🔥 DASHBOARD ERROR:", err);
     return res.status(500).json({ error: "Failed to fetch dashboard data" });

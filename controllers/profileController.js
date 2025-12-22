@@ -1,4 +1,5 @@
 import supabase from "../utils/supabaseClient.js";
+import { supabaseAdmin } from "../utils/supabaseClient.js";
 import sharp from "sharp";
 
 /* ============================================================================
@@ -119,6 +120,20 @@ export const updateUserProfile = async (req, res) => {
       }
     }
 
+    /* 🔥 RECOMPUTE FULL NAME */
+    if (payload.first_name !== undefined || payload.last_name !== undefined) {
+      const { data: current } = await supabase
+        .from("profiles")
+        .select("first_name, last_name")
+        .eq("id", userId)
+        .single();
+
+      const first = payload.first_name ?? current.first_name ?? "";
+      const last = payload.last_name ?? current.last_name ?? "";
+
+      payload.full_name = `${first} ${last}`.trim();
+    }
+
     const { data, error } = await supabase
       .from("profiles")
       .update(payload)
@@ -128,12 +143,16 @@ export const updateUserProfile = async (req, res) => {
 
     if (error) return res.status(400).json({ error: error.message });
 
-    res.json({ message: "Profile updated", profile: data });
+    return res.json({
+      message: "Profile updated",
+      profile: data,
+    });
   } catch (err) {
     console.error("UPDATE PROFILE ERROR:", err);
-    res.status(500).json({ error: "Unable to update profile" });
+    return res.status(500).json({ error: "Unable to update profile" });
   }
 };
+
 
 /* ============================================================================
    4. CHANGE PASSWORD (Supabase Auth)
@@ -213,16 +232,24 @@ export const revokeSession = async (req, res) => {
   const userId = req.user.id;
   const { id } = req.params;
 
-  const { error } = await supabase
+  const currentSessionId = req.headers["x-session-id"];
+
+  const { error } = await supabaseAdmin
     .from("user_sessions")
     .update({ active: false })
     .eq("id", id)
     .eq("user_id", userId);
 
-  if (error) return res.status(400).json({ error: error.message });
+  if (error) {
+    return res.status(400).json({ error: error.message });
+  }
 
-  res.json({ message: "Session revoked" });
+  res.json({
+    message: "Session revoked",
+    revoked_current: id === currentSessionId, // 🔥 KEY LINE
+  });
 };
+
 
 /* ============================================================================
    8. TOGGLE TWO-FACTOR AUTH (2FA)
