@@ -220,3 +220,78 @@ export const logBookRead = async (req, res) => {
     res.status(500).json({ error: "Could not log read action" });
   }
 };
+import { supabaseAdmin } from "../utils/supabaseClient.js";
+
+/* ======================================================
+   RATE EBOOK
+   POST /api/ebooks/:id/rate
+====================================================== */
+export const rateEbook = async (req, res) => {
+  try {
+    const ebookId = req.params.id;
+    const userId = req.user.id;
+    const { rating } = req.body;
+
+    /* -------------------------
+       VALIDATION
+    ------------------------- */
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      return res.status(400).json({ error: "Rating must be 1–5" });
+    }
+
+    /* -------------------------
+       UPSERT USER RATING
+    ------------------------- */
+    const { error: upsertError } = await supabaseAdmin
+      .from("ebook_ratings")
+      .upsert(
+        {
+          user_id: userId,
+          ebook_id: ebookId,
+          rating,
+          updated_at: new Date(),
+        },
+        { onConflict: "user_id,ebook_id" }
+      );
+
+    if (upsertError) throw upsertError;
+
+    /* -------------------------
+       RECALCULATE AVG + COUNT
+    ------------------------- */
+    const { data, error: fetchError } = await supabaseAdmin
+      .from("ebook_ratings")
+      .select("rating", { count: "exact" })
+      .eq("ebook_id", ebookId);
+
+    if (fetchError) throw fetchError;
+
+    const reviews = data.length;
+    const avg =
+      reviews === 0
+        ? 0
+        : data.reduce((sum, r) => sum + r.rating, 0) / reviews;
+
+    /* -------------------------
+       UPDATE EBOOK TABLE
+    ------------------------- */
+    const { error: updateError } = await supabaseAdmin
+      .from("ebooks")
+      .update({
+        rating: avg.toFixed(2),
+        reviews,
+      })
+      .eq("id", ebookId);
+
+    if (updateError) throw updateError;
+
+    res.json({
+      message: "Rating saved successfully",
+      rating: Number(avg.toFixed(2)),
+      reviews,
+    });
+  } catch (err) {
+    console.error("Ebook rating error:", err);
+    res.status(500).json({ error: "Failed to save rating" });
+  }
+};

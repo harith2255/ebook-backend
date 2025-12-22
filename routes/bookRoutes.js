@@ -5,6 +5,7 @@ import {
   getBookById,
   searchBooksByName,
   logBookRead,
+  rateEbook
 } from "../controllers/bookController.js";
 
 import { drmCheck } from "../middleware/drmCheck.js";
@@ -22,7 +23,11 @@ router.get("/", verifySupabaseAuth.required, getAllBooks);
 // Search books by name (requires login)
 router.get("/search", verifySupabaseAuth.required, searchBooksByName);
 
-
+router.post(
+  "/:id/rate",
+  verifySupabaseAuth.required,
+  rateEbook
+);
 router.get("/:id", verifySupabaseAuth.required, getBookById);
 
 // Log a book reading event

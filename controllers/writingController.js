@@ -96,8 +96,9 @@ export const getOrderById = async (req, res) => {
 ===================================================== */
 export const updateOrder = async (req, res) => {
   try {
-    const userId = req.user.id;
-    const updatedBy = req.user.user_metadata?.full_name || req.user.email;
+    const userId = req.user.id; // ✅ UUID
+    const updatedByName =
+      req.user.user_metadata?.full_name || req.user.email;
 
     const { id } = req.params;
     const { deadline, additional_notes } = req.body;
@@ -109,7 +110,6 @@ export const updateOrder = async (req, res) => {
       .single();
 
     if (error || !order) {
-      console.error("updateOrder: order fetch error:", error);
       return res.status(404).json({ error: "Order not found" });
     }
 
@@ -125,43 +125,38 @@ export const updateOrder = async (req, res) => {
 
     const { error: updateErr } = await supabase
       .from("writing_orders")
-      .update({
-        deadline: deadline || null,
-        additional_notes: additional_notes || null,
-        updated_by: updatedBy,
-        updated_at: new Date().toISOString(),
-      })
+     .update({
+  deadline: deadline || null,
+  additional_notes: additional_notes || null,
+  user_updated_at: new Date().toISOString(),
+  user_updated_notes: additional_notes || null,
+})
+
       .eq("id", id);
 
     if (updateErr) {
-      console.error("updateOrder update error:", updateErr);
+      console.error(updateErr);
       return res.status(500).json({ error: "Failed to update order" });
     }
 
-    // Notify writer if one exists
+    // Notify writer
     if (order.author_id) {
-      const { error: notifErr } = await supabase
-        .from("user_notifications")
-        .insert([
-          {
-            user_id: order.author_id,
-            title: "Order Updated",
-            message: `Order #${id} updated by ${updatedBy}.`,
-            created_at: new Date(),
-          },
-        ]);
-
-      if (notifErr) {
-        console.warn("updateOrder notification error:", notifErr.message);
-      }
+      await supabase.from("user_notifications").insert([
+        {
+          user_id: order.author_id,
+          title: "Order Updated",
+          message: `Order #${id} updated by ${updatedByName}.`,
+        },
+      ]);
     }
 
     return res.json({ message: "Order updated & writer notified" });
   } catch (err) {
-    console.error("updateOrder server error:", err);
+    console.error(err);
     return res.status(500).json({ error: "Server error updating order" });
   }
 };
+
 
 /* =====================================================
    SEND MESSAGE / FEEDBACK TO WRITER

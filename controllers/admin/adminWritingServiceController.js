@@ -50,35 +50,43 @@ export const acceptOrder = async (req, res) => {
     const id = req.params.id;
     const adminId = req.user.id;
 
-    const { data: order, error: findErr } = await supabase
+    const { data: order, error } = await supabase
       .from("writing_orders")
-      .select("*")
+      .select("id, user_id, status, payment_success")
       .eq("id", id)
       .single();
 
-    if (findErr) throw findErr;
-    if (!order.payment_success)
-      return res
-        .status(403)
-        .json({ error: "Cannot accept an unpaid order" });
+    if (error || !order) {
+      return res.status(404).json({ error: "Order not found" });
+    }
 
-    // Update status
-    const { error } = await supabase
+    if (!order.payment_success) {
+      return res.status(403).json({ error: "Unpaid order" });
+    }
+
+    if (order.status !== "Pending") {
+      return res.status(400).json({ error: "Order already processed" });
+    }
+
+    const { error: updateErr } = await supabase
       .from("writing_orders")
       .update({
         status: "In Progress",
+         progress: 30,
         author_id: adminId,
         accepted_at: new Date().toISOString(),
+        admin_updated_at: new Date().toISOString(),
+        admin_updated_by: adminId,
       })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("status", "Pending"); // race-safe
 
-    if (error) throw error;
+    if (updateErr) throw updateErr;
 
-    // Notify user
     await supabase.from("user_notifications").insert({
       user_id: order.user_id,
       title: "Order Accepted",
-      message: `Your writing request (#${id}) is now being worked on.`,
+      message: `Your writing request (#${id}) is now in progress.`,
     });
 
     return res.json({ success: true });
@@ -88,6 +96,7 @@ export const acceptOrder = async (req, res) => {
   }
 };
 
+
 /* ============================================================
    ADMIN: COMPLETE ORDER
 =============================================================== */
@@ -96,36 +105,44 @@ export const completeOrder = async (req, res) => {
     const id = req.params.id;
     const { final_text, notes_url } = req.body;
 
-    const { data: order, error: findErr } = await supabase
+    if (!final_text && !notes_url) {
+      return res.status(400).json({ error: "Final text or file required" });
+    }
+
+    const { data: order, error } = await supabase
       .from("writing_orders")
-      .select("*")
+      .select("id, user_id, status")
       .eq("id", id)
       .single();
 
-    if (findErr) throw findErr;
+    if (error || !order) {
+      return res.status(404).json({ error: "Order not found" });
+    }
 
-    if (!order.payment_success)
-      return res
-        .status(403)
-        .json({ error: "Cannot complete unpaid order" });
+    if (order.status !== "In Progress") {
+      return res.status(400).json({ error: "Order not in progress" });
+    }
 
-    const { error } = await supabase
+    const { error: updateErr } = await supabase
       .from("writing_orders")
       .update({
         status: "Completed",
+         progress: 100,
         final_text,
         notes_url,
         completed_at: new Date().toISOString(),
+        admin_updated_at: new Date().toISOString(),
+        admin_updated_by: req.user.id,
       })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("status", "In Progress");
 
-    if (error) throw error;
+    if (updateErr) throw updateErr;
 
-    // Notify user
     await supabase.from("user_notifications").insert({
       user_id: order.user_id,
       title: "Order Completed",
-      message: `Your writing order (#${id}) is now ready. Download or read it.`,
+      message: `Your writing order (#${id}) is now ready.`,
     });
 
     return res.json({ success: true });
@@ -135,6 +152,7 @@ export const completeOrder = async (req, res) => {
   }
 };
 
+
 /* ============================================================
    ADMIN: REJECT ORDER
 =============================================================== */
@@ -143,33 +161,42 @@ export const rejectOrder = async (req, res) => {
     const id = req.params.id;
     const { reason } = req.body;
 
-    if (!reason)
-      return res.status(400).json({ error: "Rejection reason is required" });
+    if (!reason) {
+      return res.status(400).json({ error: "Rejection reason required" });
+    }
 
-    const { data: order, error: findErr } = await supabase
+    const { data: order, error } = await supabase
       .from("writing_orders")
-      .select("*")
+      .select("id, user_id, status")
       .eq("id", id)
       .single();
 
-    if (findErr) throw findErr;
+    if (error || !order) {
+      return res.status(404).json({ error: "Order not found" });
+    }
 
-    const { error } = await supabase
+    if (order.status !== "Pending") {
+      return res.status(400).json({ error: "Only pending orders can be rejected" });
+    }
+
+    const { error: updateErr } = await supabase
       .from("writing_orders")
       .update({
         status: "Rejected",
         rejection_reason: reason,
         rejected_at: new Date().toISOString(),
+        admin_updated_at: new Date().toISOString(),
+        admin_updated_by: req.user.id,
       })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("status", "Pending");
 
-    if (error) throw error;
+    if (updateErr) throw updateErr;
 
-    // Notify user
     await supabase.from("user_notifications").insert({
       user_id: order.user_id,
       title: "Order Rejected",
-      message: `Your writing order #${id} was rejected. Reason: ${reason}`,
+      message: `Your writing order (#${id}) was rejected. Reason: ${reason}`,
     });
 
     return res.json({ success: true });
@@ -178,6 +205,7 @@ export const rejectOrder = async (req, res) => {
     return res.status(500).json({ error: "Failed to reject order" });
   }
 };
+
 
 /* ============================================================
    ADMIN: SEND MESSAGE TO USER
@@ -208,6 +236,17 @@ export const adminReply = async (req, res) => {
       sender: "admin",
       created_at: new Date(),
     });
+
+    await supabase
+  .from("writing_orders")
+  .update({
+    progress: 60,
+    admin_updated_at: new Date().toISOString(),
+    admin_updated_by: req.user.id,
+  })
+  .eq("id", order_id)
+  .lt("progress", 60); // prevents downgrade
+
 
     // Notify user
     await supabase.from("user_notifications").insert({

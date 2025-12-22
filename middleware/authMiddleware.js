@@ -41,6 +41,8 @@ export const verifySupabaseAuth = {
       // 🔥 AUTO-FIX + LOG
       if (!profile) {
         console.warn("⚠️ Profile missing. Auto-creating:", req.user.id);
+        console.log("USING ADMIN CLIENT:", supabase === supabaseAdmin);
+
 
         const { error: insertErr } = await supabaseAdmin
           .from("profiles")
