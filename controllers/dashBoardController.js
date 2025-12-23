@@ -1,14 +1,6 @@
 // controllers/dashboardController.js
 import supabase from "../utils/supabaseClient.js";
 
-/**
- * 📊 GET /api/dashboard
- * Fetch complete dashboard data for a student
- *
- * NOTE: Because `user_library` only has `added_at` and not `updated_at`,
- * we use `added_at` when filtering for "books completed this month".
- * This is a limitation — see the migration SQL below to add `completed_at`.
- */
 // Ignore sessions shorter than ~1 minute
 const MIN_SESSION_HOURS = 1 / 60; // 0.0167 hours
 

@@ -183,6 +183,22 @@ export const getTransactions = async (req, res) => {
     const limit = Number(req.query.limit) || 10;
     const start = (page - 1) * limit;
     const end = start + limit - 1;
+function toIST(date) {
+  // Force UTC interpretation by appending Z
+  const utcDate = new Date(date + "Z");
+
+  return utcDate.toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  });
+}
+
 
     const { data, error, count } = await supabaseAdmin
       .from("revenue")
@@ -216,7 +232,7 @@ export const getTransactions = async (req, res) => {
           status: (p?.status || "completed").toLowerCase(),
           type: p?.description || row.item_type || "payment",
           method: p?.method || "manual",
-          date: row.created_at,
+           date: toIST(row.created_at), 
           user: await resolveUserName(row.user_id),
         };
       })

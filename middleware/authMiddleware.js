@@ -1,6 +1,4 @@
 import { supabasePublic, supabaseAdmin } from "../utils/supabaseClient.js";
-
-import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -10,78 +8,91 @@ export const verifySupabaseAuth = {
       const authHeader = req.headers.authorization;
 
       if (!authHeader?.startsWith("Bearer ")) {
-        console.warn("❌ Missing Authorization header");
         return res.status(401).json({ error: "Missing Authorization header" });
       }
 
       const token = authHeader.split(" ")[1];
 
-      // 1️⃣ Verify Supabase token
+      /* ===============================
+         1️⃣ Verify Supabase token
+      =============================== */
       const { data, error } = await supabasePublic.auth.getUser(token);
 
       if (error || !data?.user) {
-        console.warn("❌ Invalid Supabase token", error);
         return res.status(401).json({ error: "Invalid token" });
       }
 
       req.user = data.user;
 
-      // 2️⃣ Profile lookup
-      const { data: profile, error: profileErr } = await supabaseAdmin
+      /* ===============================
+         2️⃣ Fetch profile
+      =============================== */
+      let { data: profile, error: profileErr } = await supabaseAdmin
         .from("profiles")
         .select("account_status")
         .eq("id", req.user.id)
         .maybeSingle();
 
       if (profileErr) {
-        console.error("🔥 Profile DB error:", profileErr);
+        console.error("Profile fetch failed:", profileErr);
         return res.status(500).json({ error: "Profile lookup failed" });
       }
 
-      // 🔥 AUTO-FIX + LOG
+      /* ===============================
+         3️⃣ Auto-create profile (SAFE)
+      =============================== */
       if (!profile) {
-        console.warn("⚠️ Profile missing. Auto-creating:", req.user.id);
-        console.log("USING ADMIN CLIENT:", supabase === supabaseAdmin);
-
-
         const { error: insertErr } = await supabaseAdmin
           .from("profiles")
           .insert({
             id: req.user.id,
-            email: req.user.email,
+            email: req.user.email ?? null,
             account_status: "active",
-            created_at: new Date().toISOString(),
           });
 
         if (insertErr) {
-          console.error("🔥 Profile auto-create failed:", insertErr);
+          console.error("Profile auto-create failed:", insertErr);
           return res.status(500).json({ error: "Profile setup failed" });
         }
-      }
-await supabaseAdmin
-  .from("user_sessions")
-  .update({ last_active: new Date().toISOString() })
-  .eq("user_id", req.user.id)
-  .eq("active", true);
 
-      // 3️⃣ Suspension check
+        // Re-fetch profile
+        const refetch = await supabaseAdmin
+          .from("profiles")
+          .select("account_status")
+          .eq("id", req.user.id)
+          .single();
+
+        profile = refetch.data;
+      }
+
+      /* ===============================
+         4️⃣ Update session activity
+      =============================== */
+      await supabaseAdmin
+        .from("user_sessions")
+        .update({ last_active: new Date().toISOString() })
+        .eq("user_id", req.user.id)
+        .eq("active", true);
+
+      /* ===============================
+         5️⃣ Suspension check
+      =============================== */
       if (profile?.account_status === "suspended" && req.method !== "GET") {
-        console.warn("🚫 Suspended user attempted write:", req.user.id);
         return res.status(403).json({
           error: "Account suspended. Read-only access enabled.",
         });
       }
+
       next();
     } catch (err) {
-      console.error("🔥 Auth middleware crash:", err);
+      console.error("Auth middleware crash:", err);
       return res.status(500).json({ error: "Internal server error" });
     }
   },
 };
 
+export default verifySupabaseAuth;
 
-// FIX: correct backward compatibility
-export default verifySupabaseAuth; // 👈 THIS IS THE FIX
 
 export function adminOnly(req, res, next) {
   try {
