@@ -18,26 +18,32 @@ export const listCustomers = async (req, res) => {
 
     const { search, status, plan } = req.query;
 
-    // ⚠ MUST use admin client
-    let query = supabaseAdmin.from("v_customers").select("*", { count: "exact" });
+ let query = supabaseAdmin
+  .from("v_customers")
+  .select("*", { count: "exact" });
 
-   if (status) query = query.eq("account_status", status);
+const ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL?.toLowerCase();
+if (ADMIN_EMAIL) {
+  query = query.neq("email", ADMIN_EMAIL);
+}
 
+if (status) query = query.eq("account_status", status);
+if (plan) query = query.eq("subscription_plan", plan);
 
-   if (plan) query = query.eq("subscription_plan", plan);
+if (search) {
+  query = query.or(
+    `full_name.ilike.%${search}%,email.ilike.%${search}%`
+  );
+}
 
-
-    if (search) {
-    query = query.or(`full_name.ilike.%${search}%,email.ilike.%${search}%`);
-
-    }
 
     const { data, count, error } = await query
-     .order("created_at", { ascending: false })
-
+      .order("created_at", { ascending: false })
       .range(start, end);
 
-    if (error) return res.status(400).json({ error: error.message });
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
 
     res.json({
       data,
