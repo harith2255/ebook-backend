@@ -62,10 +62,11 @@ export const createArticle = async (req, res) => {
       imageUrl = data.publicUrl;
       imagePath = path;
     }
+const normalizedCategory = category.trim().toLowerCase();
 
     const { error } = await supabaseAdmin.from("current_affairs").insert({
       title,
-      category,
+     category: normalizedCategory, 
       content,
       tags,
       importance,
@@ -92,10 +93,14 @@ export const updateArticle = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const updateData = {
-      ...req.body,
-      updated_at: new Date(),
-    };
+   const updateData = {
+  ...req.body,
+  category: req.body.category
+    ? req.body.category.trim().toLowerCase()
+    : undefined,
+  updated_at: new Date(),
+};
+
 
     const { error } = await supabaseAdmin
       .from("current_affairs")

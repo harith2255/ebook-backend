@@ -11,18 +11,8 @@ export const getCurrentAffairs = async (req, res) => {
     const from = (page - 1) * limit;
     const to = from + Number(limit) - 1;
 
-    const CATEGORY_MAP = {
-      "National Affairs": "national",
-      "International News": "international",
-      "Economy": "economy",
-      "Science & Tech": "science",
-      "Sports": "sports",
-      "Environment": "environment",
-    };
 
-    const REVERSE_CATEGORY_MAP = Object.fromEntries(
-      Object.entries(CATEGORY_MAP).map(([k, v]) => [v, k])
-    );
+
 
     let query = supabaseAdmin
       .from("current_affairs")
@@ -34,13 +24,18 @@ export const getCurrentAffairs = async (req, res) => {
       .order("article_date", { ascending: false })
       .range(from, to);
 
-    if (category !== "all" && REVERSE_CATEGORY_MAP[category]) {
-      query = query.eq("category", REVERSE_CATEGORY_MAP[category]);
-    }
+    if (category !== "all") {
+  query = query.eq("category", category);
+}
 
-    if (search) {
-      query = query.or(`title.ilike.%${search}%,content.ilike.%${search}%`);
-    }
+
+   if (search) {
+  const safeSearch = search.toLowerCase();
+
+  query = query.or(
+    `title.ilike.%${safeSearch}%,content.ilike.%${safeSearch}%,tags.ilike.%${safeSearch}%`
+  );
+}
 
     const { data, error, count } = await query;
     if (error) throw error;
@@ -63,9 +58,12 @@ export const getCurrentAffairs = async (req, res) => {
       data: safeData.map(a => ({
         id: a.id,
         title: a.title,
-        category: CATEGORY_MAP[a.category] || "all",
+        category: a.category,
         description: a.content,
-        tags: a.tags ? a.tags.split(",") : [],
+        tags: a.tags
+  ? a.tags.split(",").map(t => t.trim().toLowerCase())
+  : [],
+
         importance: a.importance,
         views: a.views ?? 0,
         date: a.article_date,
@@ -103,5 +101,35 @@ export const incrementViews = async (req, res) => {
   } catch (err) {
     console.error("VIEW UPDATE ERROR:", err);
     res.status(500).json({ error: "Failed to update views" });
+  }
+};
+export const getCurrentAffairsCategories = async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("current_affairs")
+      .select("category")
+      .eq("status", "published");
+
+    if (error) throw error;
+
+    const uniqueCategories = [
+      "all",
+      ...Array.from(
+        new Set(data.map(item => item.category?.toLowerCase()))
+      ).filter(Boolean)
+    ];
+
+    res.json(
+      uniqueCategories.map(cat => ({
+        id: cat,
+        name: cat === "all"
+          ? "All Categories"
+          : cat.charAt(0).toUpperCase() + cat.slice(1),
+      }))
+    );
+
+  } catch (err) {
+    console.error("CATEGORY FETCH ERROR:", err);
+    res.status(500).json({ error: "Failed to load categories" });
   }
 };
