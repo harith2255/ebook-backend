@@ -80,110 +80,89 @@ if (profileUpsertError) {
 export async function login(req, res) {
   try {
     const { email, password } = req.body;
-    if (!email || !password)
+    if (!email || !password) {
       return res.status(400).json({ error: "Email and password required" });
+    }
 
-    // ✅ USER LOGIN (anon client)
+    /* 1️⃣ Supabase Auth */
     const { data: loginData, error: loginError } =
       await supabase.auth.signInWithPassword({ email, password });
 
-    if (loginError)
+    if (loginError) {
       return res.status(400).json({ error: loginError.message });
+    }
 
     const userId = loginData.user.id;
     const accessToken = loginData.session.access_token;
 
-    // ✅ PROFILE FETCH (admin)
+    /* 2️⃣ Profile */
     const { data: profile, error: profileError } =
       await supabaseAdmin
         .from("profiles")
-        .select("status, full_name, first_name, last_name, role, email")
+        .select("status, full_name, first_name, last_name, role")
         .eq("id", userId)
         .single();
 
-    if (profileError)
+    if (profileError) {
       return res.status(400).json({ error: profileError.message });
+    }
 
     const isSuspended = profile.status === "Suspended";
-    let role = profile.role || "User";
-
-    // Super admin override
-    if (email === process.env.SUPER_ADMIN_EMAIL) {
-      role = "super_admin";
-      await supabaseAdmin.auth.admin.updateUserById(userId, {
-        app_metadata: { role },
-      });
-      await supabaseAdmin.from("profiles").upsert({ id: userId, role });
-    }
+    const role = profile.role || "User";
 
     const fullName =
       profile.full_name ||
       `${profile.first_name || ""} ${profile.last_name || ""}`.trim();
 
-    if (role === "User") {
-      await logActivity(userId, fullName, "logged in", "login");
-    }
+    /* 3️⃣ Device ID */
+    const rawDevice = [
+      req.headers["sec-ch-ua-platform"] || "unknown-platform",
+      req.headers["user-agent"] || "unknown-agent",
+      req.ip || "unknown-ip",
+    ].join("|");
 
-const rawDevice = [
-  req.headers["sec-ch-ua-platform"] || "unknown-platform",
-  req.headers["user-agent"] || "unknown-agent",
-  req.ip?.split(":").slice(0, 2).join(":") || "unknown-ip"
-].join("|");
+    const deviceId = crypto
+      .createHash("sha256")
+      .update(rawDevice)
+      .digest("hex");
 
-const deviceId = crypto
-  .createHash("sha256")
-  .update(rawDevice)
-  .digest("hex");
-// 🔒 Deactivate other device sessions
+    /* 4️⃣ Session expiry */
+   const SESSION_DAYS = 15;
+
+const now = new Date();
+const expiresAt = new Date(
+  now.getTime() + SESSION_DAYS * 24 * 60 * 60 * 1000
+);
+
+// deactivate old sessions (optional)
 await supabaseAdmin
   .from("user_sessions")
   .update({ active: false })
-  .eq("user_id", userId)
-  .neq("device_id", deviceId);
-// ✅ Upsert current session
-const { data: sessionRow, error: sessionErr } =
-  await supabaseAdmin
-    .from("user_sessions")
-    .upsert(
-      {
-        user_id: userId,
-        device_id: deviceId,
-        device: req.headers["sec-ch-ua-platform"] || "Unknown",
-        location: req.ip || "Unknown",
-        user_agent: req.headers["user-agent"],
-        active: !isSuspended,
-        last_active: new Date().toISOString(),
-      },
-      { onConflict: "user_id,device_id" }
-    )
-    .select()
-    .single();
+  .eq("user_id", userId);
 
-if (sessionErr) {
-  console.error("Session upsert error:", sessionErr);
+// create new session
+const { data: sessionRow, error } = await supabaseAdmin
+  .from("user_sessions")
+  .insert({
+    user_id: userId,
+    device_id: deviceId,
+    active: true,
+    last_active: now.toISOString(),
+    expires_at: expiresAt.toISOString(),
+    device: req.headers["sec-ch-ua-platform"] || "Unknown",
+    user_agent: req.headers["user-agent"],
+    location: req.ip || "Unknown",
+  })
+  .select()
+  .single();
+
+if (error) {
+  console.error(error);
+  return res.status(500).json({ error: "Session creation failed" });
 }
 
-    // DRM login log
-    await supabaseAdmin.from("drm_access_logs").insert({
-      user_id: userId,
-      user_name: fullName,
-      action: "login",
-      device_info: req.headers["user-agent"],
-      ip_address: req.ip,
-      created_at: new Date(),
-    });
-    await supabaseAdmin
-  .from("user_preferences")
-  .upsert(
-    {
-      user_id: userId,
-      timezone: "Asia/Kolkata",
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "user_id" }
-  );
 
-
+    /* 7️⃣ Success */
     return res.json({
       message: isSuspended
         ? "Login successful (Read-only mode)"
@@ -197,40 +176,39 @@ if (sessionErr) {
       },
       access_token: accessToken,
       refresh_token: loginData.session.refresh_token,
-       session_id: sessionRow?.id,
+      session_id: sessionRow.id,
     });
-
-    
   } catch (err) {
     console.error("Login error:", err);
     return res.status(500).json({ error: "Internal Server Error" });
   }
 }
 
-
-
 /* =====================================================
-   🚪 LOGOUT USER + DRM LOGGING ADDED HERE
+   🚪 LOGOUT USER (SESSION-BASED)
 ===================================================== */
 export async function logout(req, res) {
   try {
-    const accessToken =
-      req.headers.authorization?.replace("Bearer ", "");
+    const sessionId = req.headers["x-session-id"];
 
-    if (!accessToken) {
-      return res.status(400).json({ error: "No token provided" });
+    if (!req.user) {
+      return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const { error } = await supabase.auth.signOut({
-      accessToken,
-    });
-
-    if (error) {
-      return res.status(400).json({ error: error.message });
+    // 🔒 Invalidate current session ONLY
+    if (sessionId) {
+      await supabaseAdmin
+        .from("user_sessions")
+        .update({
+          active: false,
+          last_active: new Date().toISOString(),
+        })
+        .eq("id", sessionId)
+        .eq("user_id", req.user.id);
     }
 
     // Activity log
-    if (req.user && req.user.role === "User") {
+    if (req.user.role === "User") {
       await logActivity(
         req.user.id,
         req.user.full_name || req.user.email,
@@ -238,23 +216,11 @@ export async function logout(req, res) {
         "login"
       );
     }
-const sessionId = req.headers["x-session-id"];
-
-if (sessionId) {
-  await supabaseAdmin
-    .from("user_sessions")
-    .update({
-      active: false,
-      last_active: new Date().toISOString(),
-    })
-    .eq("id", sessionId)
-    .eq("user_id", req.user.id);
-}
 
     // DRM log
     await supabaseAdmin.from("drm_access_logs").insert({
-      user_id: req.user?.id,
-      user_name: req.user?.full_name || req.user?.email,
+      user_id: req.user.id,
+      user_name: req.user.full_name || req.user.email,
       action: "logout",
       device_info: req.headers["user-agent"],
       ip_address: req.ip,
@@ -267,4 +233,5 @@ if (sessionId) {
     return res.status(500).json({ error: "Internal Server Error" });
   }
 }
+
 
