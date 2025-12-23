@@ -29,7 +29,7 @@ export async function register(req, res) {
 
     const userId = authData.user.id;
 
-    /* 2️⃣ UPDATE PROFILE (DO NOT INSERT) */
+  
    /* 2️⃣ UPSERT PROFILE (SAFE) */
 const { error: profileUpsertError } = await supabaseAdmin
   .from("profiles")
