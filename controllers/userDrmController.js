@@ -11,18 +11,29 @@ export const registerDevice = async (req, res) => {
     if (!device_id)
       return res.status(400).json({ error: "device_id required" });
 
-    await supabase.from("drm_devices").insert({
-      user_id: userId,
-      device_id,
-      created_at: new Date(),
-    });
+    const { data, error } = await supabase
+      .from("drm_devices")
+      .upsert(
+        {
+          user_id: userId,
+          device_id,
+          created_at: new Date(),
+        },
+        { onConflict: "user_id,device_id" } // <-- tell Supabase which fields are unique
+      );
 
-    return res.json({ message: "Device registered" });
+    if (error) {
+      console.error("upsert error:", error);
+      return res.status(500).json({ error: "Failed to register device" });
+    }
+
+    return res.json({ message: "Device registered", data });
   } catch (err) {
     console.error("registerDevice error:", err);
     return res.status(500).json({ error: "Failed to register device" });
   }
 };
+
 
 /* ======================================================
    DRM CHECK ACCESS — Books + Notes

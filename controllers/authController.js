@@ -141,25 +141,30 @@ await supabaseAdmin
   .eq("user_id", userId);
 
 // create new session
+// create/update session for this user + device
 const { data: sessionRow, error } = await supabaseAdmin
   .from("user_sessions")
-  .insert({
-    user_id: userId,
-    device_id: deviceId,
-    active: true,
-    last_active: now.toISOString(),
-    expires_at: expiresAt.toISOString(),
-    device: req.headers["sec-ch-ua-platform"] || "Unknown",
-    user_agent: req.headers["user-agent"],
-    location: req.ip || "Unknown",
-  })
+  .upsert(
+    {
+      user_id: userId,
+      device_id: deviceId,
+      active: true,
+      last_active: now.toISOString(),
+      expires_at: expiresAt.toISOString(),
+      device: req.headers["sec-ch-ua-platform"] || "Unknown",
+      user_agent: req.headers["user-agent"],
+      location: req.ip || "Unknown",
+    },
+    { onConflict: "user_id,device_id" } // VERY IMPORTANT
+  )
   .select()
   .single();
 
 if (error) {
-  console.error(error);
+  console.error("Session upsert error:", error);
   return res.status(500).json({ error: "Session creation failed" });
 }
+
 
 
     /* 7️⃣ Success */
