@@ -10,6 +10,23 @@ export const unifiedPurchase = async (req, res) => {
   try {
     const userId = req.user.id;
 
+// 0️⃣ Block suspended users — READ-ONLY MODE
+const { data: profile, error: profileErr } = await supabase
+  .from("profiles")
+  .select("account_status")
+  .eq("id", userId)
+  .single();
+
+if (profileErr) {
+  return res.status(500).json({ error: "Failed to fetch account" });
+}
+
+if (profile?.account_status === "suspended") {
+  return res.status(403).json({
+    error: "Your account is suspended. Read-only mode enabled.",
+    read_only: true
+  });
+}
 
 
     // user_id must be a UUID

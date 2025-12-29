@@ -32,14 +32,21 @@ const noteId =
     /* ======================================================
        2) CHECK SUBSCRIPTION
     ====================================================== */
-    const { data: subscription } = await supabase
-      .from("subscriptions")
-      .select("*")
-      .eq("user_id", userId)
-      .maybeSingle();
+// 2) CHECK SUBSCRIPTION — only if NOT suspended
+let subscriptionActive = false;
 
-    const subscriptionActive =
-      subscription && subscription.status === "active";
+if (subscription && subscription.status === "active") {
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("account_status")
+    .eq("id", userId)
+    .single();
+
+  if (profile?.account_status !== "suspended") {
+    subscriptionActive = true;
+  }
+}
+
 
     /* ======================================================
        3) CHECK BOOK PURCHASE (IMPORTANT!)
@@ -117,6 +124,8 @@ const noteId =
       ip_address: ip,
       created_at: new Date(),
     });
+
+    
 
     // Pass DRM settings to handlers
     req.drm = drm;

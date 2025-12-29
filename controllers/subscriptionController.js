@@ -14,6 +14,22 @@ export const upgradeSubscription = async (req, res) => {
       return res.status(400).json({ error: "planId required" });
     }
 
+
+    // READ-ONLY SUSPENSION CHECK
+const { data: profile } = await supabase
+  .from("profiles")
+  .select("account_status")
+  .eq("id", userId)
+  .single();
+
+if (profile?.account_status === "suspended") {
+  return res.status(403).json({
+    error: "Your account is suspended. Read-only mode enabled.",
+    read_only: true
+  });
+}
+
+
     // 1️⃣ Fetch selected plan
     const { data: plan, error: planErr } = await supabase
       .from("subscription_plans")

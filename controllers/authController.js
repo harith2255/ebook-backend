@@ -99,7 +99,7 @@ export async function login(req, res) {
     const { data: profile, error: profileError } =
       await supabaseAdmin
         .from("profiles")
-        .select("status, full_name, first_name, last_name, role")
+        .select("account_status, full_name, first_name, last_name, role")
         .eq("id", userId)
         .single();
 
@@ -107,7 +107,7 @@ export async function login(req, res) {
       return res.status(400).json({ error: profileError.message });
     }
 
-    const isSuspended = profile.status === "Suspended";
+    const isSuspended = profile.status === "suspended";
     const role = profile.role || "User";
 
     const fullName =
