@@ -139,6 +139,13 @@ export const checkDRMAccess = async (req, res) => {
       screenshot_prevention: settings?.screenshot_prevention ?? false,
       watermarking: settings?.watermarking ?? false,
       device_limit: settings?.device_limit ?? 3,
+       watermarking: settings?.watermarking ?? false,        
+       
+       
+        // watermark text per user (nullable)
+  watermark_text: settings?.watermarking
+    ? (req.user?.email || req.user?.id || "Protected")
+    : null,     
     });
 
   } catch (err) {
