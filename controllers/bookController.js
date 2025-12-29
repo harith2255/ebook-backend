@@ -240,37 +240,55 @@ export const rateEbook = async (req, res) => {
     }
 
     /* -------------------------
+       CHECK PURCHASE STATUS
+       purchases table uses book_id
+    ------------------------- */
+    const { data: purchase, error: purchaseError } = await supabaseAdmin
+      .from("book_sales")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("book_id", ebookId) // <-- FIXED
+      .maybeSingle();
+
+    if (purchaseError) throw purchaseError;
+
+    if (!purchase) {
+      return res.status(403).json({
+        error: "You must purchase this ebook before rating it",
+      });
+    }
+
+    /* -------------------------
        UPSERT USER RATING
     ------------------------- */
+    const payload = {
+      user_id: userId,
+      ebook_id: ebookId, // this table uses ebook_id correctly
+      rating,
+      updated_at: new Date().toISOString(),
+    };
+
     const { error: upsertError } = await supabaseAdmin
       .from("ebook_ratings")
-      .upsert(
-        {
-          user_id: userId,
-          ebook_id: ebookId,
-          rating,
-          updated_at: new Date(),
-        },
-        { onConflict: "user_id,ebook_id" }
-      );
+      .upsert([payload], { onConflict: "user_id,ebook_id" });
 
     if (upsertError) throw upsertError;
 
     /* -------------------------
        RECALCULATE AVG + COUNT
     ------------------------- */
-    const { data, error: fetchError } = await supabaseAdmin
+    const { data: ratings, error: fetchError } = await supabaseAdmin
       .from("ebook_ratings")
       .select("rating", { count: "exact" })
       .eq("ebook_id", ebookId);
 
     if (fetchError) throw fetchError;
 
-    const reviews = data.length;
+    const reviews = ratings.length;
     const avg =
       reviews === 0
         ? 0
-        : data.reduce((sum, r) => sum + r.rating, 0) / reviews;
+        : ratings.reduce((sum, r) => sum + r.rating, 0) / reviews;
 
     /* -------------------------
        UPDATE EBOOK TABLE
@@ -295,3 +313,6 @@ export const rateEbook = async (req, res) => {
     res.status(500).json({ error: "Failed to save rating" });
   }
 };
+
+
+

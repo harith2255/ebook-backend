@@ -390,44 +390,18 @@ export const saveNoteLastPage = async (req, res) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    if (!last_page || Number.isNaN(Number(last_page))) {
-      return res.status(400).json({ error: "last_page is required" });
-    }
-
-    const { data: exists, error } = await supabase
-      .from("notes_read_history")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("note_id", noteId)
-      .maybeSingle();
-
-    if (error) throw error;
-
     const payload = {
-      last_page,
+      user_id: userId,     // REQUIRED
+      note_id: noteId,     // REQUIRED
+      last_page: Number(last_page),
       updated_at: new Date().toISOString(),
     };
 
-    if (exists) {
-      const { error: updateError } = await supabase
-        .from("notes_read_history")
-        .update(payload)
-        .eq("id", exists.id);
-
-      if (updateError) throw updateError;
-
-      return res.json({ success: true, last_page });
-    }
-
-    const { error: insertError } = await supabase
+    const { error } = await supabase
       .from("notes_read_history")
-      .insert({
-        user_id: userId,
-        note_id: noteId,
-        ...payload,
-      });
+      .upsert([payload], { onConflict: "user_id,note_id" });
 
-    if (insertError) throw insertError;
+    if (error) throw error;
 
     res.json({ success: true, last_page });
   } catch (err) {
@@ -435,6 +409,10 @@ export const saveNoteLastPage = async (req, res) => {
     res.status(500).json({ error: "Failed to save last page" });
   }
 };
+
+
+
+
 
 /* ============================
    PREVIEW PDF (first 2 pages)
