@@ -29,8 +29,8 @@ export const getPendingOrders = async (req, res) => {
       .from("writing_orders")
       .select("*")
     .eq("payment_success", true)
+    .eq("status", "Pending")
 
-      .eq("payment_success", true) // ONLY PAID
       .order("created_at", { ascending: false });
 
     if (error) throw error;
@@ -103,10 +103,15 @@ export const acceptOrder = async (req, res) => {
 export const completeOrder = async (req, res) => {
   try {
     const id = req.params.id;
-    const { final_text, notes_url } = req.body;
+    let { final_text, notes_url } = req.body;
 
     if (!final_text && !notes_url) {
       return res.status(400).json({ error: "Final text or file required" });
+    }
+
+    // 🟢 If admin uploaded PDF, make it the primary deliverable
+    if (notes_url) {
+      final_text = null;  // <-- IMPORTANT FIX
     }
 
     const { data: order, error } = await supabase
@@ -127,9 +132,9 @@ export const completeOrder = async (req, res) => {
       .from("writing_orders")
       .update({
         status: "Completed",
-         progress: 100,
-        final_text,
-        notes_url,
+        progress: 100,
+        final_text,      // <-- only saved if PDF isn't provided
+        notes_url,       // <-- PDF deliverable
         completed_at: new Date().toISOString(),
         admin_updated_at: new Date().toISOString(),
         admin_updated_by: req.user.id,
@@ -151,6 +156,7 @@ export const completeOrder = async (req, res) => {
     return res.status(500).json({ error: "Failed to complete order" });
   }
 };
+
 
 
 /* ============================================================

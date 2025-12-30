@@ -67,7 +67,7 @@ export const getBookById = async (req, res) => {
         )
       `)
       .eq("id", id)
-      .single();
+       .maybeSingle(); // ✔ safe
 
     if (error) throw error;
     if (!book) return res.status(404).json({ error: "Book not found" });

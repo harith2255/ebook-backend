@@ -1,7 +1,7 @@
 import express from "express";
 import {
   getServices,
-  createWritingOrder,     // ⭐ Final order creation (after payment)
+  createWritingOrder,
   getActiveOrders,
   getCompletedOrders,
   updateOrder,
@@ -13,47 +13,52 @@ import {
   getInterviewMaterials,
   getInterviewMaterialById,
   streamInterviewMaterialPdf,
- 
 } from "../controllers/writingController.js";
 
 import { verifySupabaseAuth } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-// ---------- PUBLIC ----------
+/* ---------- PUBLIC ---------- */
 router.get("/services", getServices);
 
-// ---------- AUTH REQUIRED ----------
+/* ---------- AUTH REQUIRED ---------- */
 router.use(verifySupabaseAuth.required);
 
-/* -------------------------------
-   USER WRITING ORDER ROUTES
--------------------------------- */
-router.post("/payments/verify", verifyWritingPayment);  // Step 1: verify payment
-router.post("/order", createWritingOrder);              // Step 2: create final order
+/* --------------------------------
+   ⚠️ INTERVIEW MATERIAL ROUTES
+   → MUST come BEFORE dynamic ":id"
+---------------------------------- */
+
+// list materials
+router.get("/interview-materials", getInterviewMaterials);
+
+// stream pdf of material
+router.get("/interview-materials/:id/pdf", streamInterviewMaterialPdf);
+
+// get single material info
+router.get("/interview-materials/:id", getInterviewMaterialById);
+
+/* --------------------------------
+   WRITING ORDER ROUTES
+---------------------------------- */
+router.post("/payments/verify", verifyWritingPayment);
+router.post("/order", createWritingOrder);
 
 router.get("/orders/active", getActiveOrders);
 router.get("/orders/completed", getCompletedOrders);
 
-/* ===========================
-   USER ROUTES
-=========================== */
-router.get("/", getInterviewMaterials);
-router.get("/:id", getInterviewMaterialById);
-
-router.get(
-  "/interview-materials/:id/pdf",
- 
-  streamInterviewMaterialPdf
-);
-
 router.put("/orders/:id", updateOrder);
-
 router.post("/feedback", sendFeedback);
 router.get("/feedback/:order_id", getFeedbackForOrder);
 
 router.post("/upload", uploadUserAttachment);
-
 router.get("/order/:id", getSingleWritingOrder);
+
+/* --------------------------------
+   ⚠️ OPTIONAL CATCH ROUTE FOR OTHER IDs
+   last to avoid conflicts
+---------------------------------- */
+// router.get("/:id", getInterviewMaterialById); // ← enable ONLY if needed later
 
 export default router;
