@@ -55,19 +55,40 @@ export const updateDRMSettings = async (req, res) => {
 ====================================================== */
 export const getAccessLogs = async (req, res) => {
   try {
-    const { data, error } = await supabase
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = (page - 1) * limit;
+
+    // ---- Get paginated logs ----
+    const { data: logs, error } = await supabase
       .from("drm_access_logs")
-      .select("user_id, user_name, action, book_title, device_info, ip_address, created_at")
+      .select(
+        "id, user_id, user_name, action, book_title, device_info, ip_address, created_at",
+        { count: "exact" } // gives total rows
+      )
       .order("created_at", { ascending: false })
-      .limit(100);
+      .range(offset, offset + limit - 1);
 
-    if (error) return res.status(400).json({ error: error.message });
+    if (error) {
+      console.error("getAccessLogs error:", error);
+      return res.status(500).json({ error: error.message });
+    }
 
-    res.json({ logs: data });
+    return res.json({
+      logs,
+      page,
+      limit,
+      total: logs?.length ?? 0,
+    });
+
   } catch (err) {
-    res.status(500).json({ error: "Failed to load logs" });
+    console.error("getAccessLogs fatal:", err);
+    return res.status(500).json({ error: "Failed to load logs" });
   }
 };
+
+
+
 
 /* ======================================================
    ADD WATERMARK (QUEUE JOB)

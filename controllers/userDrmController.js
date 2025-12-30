@@ -44,56 +44,44 @@ export const registerDevice = async (req, res) => {
 export const checkDRMAccess = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { book_id, note_id } = req.query;
+    const { book_id, note_id, device_id } = req.query;
 
     const id = book_id || note_id;
     const isNote = !!note_id;
 
+    if (!device_id)
+      return res.json({ can_read: false, reason: "missing_device_id" });
+
     if (!id)
       return res.json({ can_read: false, reason: "missing_id" });
 
-    // Load DRM settings
+    // DRM settings
     const { data: settings } = await supabase
       .from("drm_settings")
       .select("*")
       .eq("id", 1)
       .single();
 
-    // Fetch item (book or note)
-    let itemRow;
+    if (!settings)
+      return res.json({ can_read: false, reason: "settings_missing" });
 
-    if (isNote) {
-      const { data } = await supabase
-        .from("notes")
-        .select("id, title, price")
-        .eq("id", id)
-        .single();
+    // Fetch book/note
+    const table = isNote ? "notes" : "ebooks";
+    const { data: itemRow } = await supabase
+      .from(table)
+      .select("id, title, price")
+      .eq("id", id)
+      .maybeSingle();
 
-      itemRow = data;
-    } else {
-      const { data } = await supabase
-        .from("ebooks")
-        .select("id, title, price")
-        .eq("id", id)
-        .single();
-
-      itemRow = data;
-    }
-
-    // FIXED: correct check
-    if (!itemRow) {
-      return res.json({
-        can_read: false,
-        reason: isNote ? "note_not_found" : "book_not_found",
-      });
-    }
+    if (!itemRow)
+      return res.json({ can_read: false, reason: "item_not_found" });
 
     const isFree = Number(itemRow.price) === 0;
 
     // Subscription check
     const { data: subscription } = await supabase
       .from("subscriptions")
-      .select("*")
+      .select("id")
       .eq("user_id", userId)
       .eq("status", "active")
       .maybeSingle();
@@ -101,30 +89,37 @@ export const checkDRMAccess = async (req, res) => {
     const subscriptionActive = !!subscription;
 
     // Individual purchase check
-    let individuallyPurchased = false;
+    const purchaseTable = isNote ? "notes_purchase" : "book_sales";
+    const { data: purchased } = await supabase
+      .from(purchaseTable)
+      .select("id")
+      .eq("user_id", userId)
+      .eq(isNote ? "note_id" : "book_id", id)
+      .maybeSingle();
 
-    if (isNote) {
-      const { data } = await supabase
-        .from("notes_purchase")
-        .select("id")
-        .eq("user_id", userId)
-        .eq("note_id", id)
-        .maybeSingle();
+    const individuallyPurchased = !!purchased;
 
-      individuallyPurchased = !!data;
-    } else {
-      const { data } = await supabase
-        .from("book_sales")
-        .select("id")
-        .eq("user_id", userId)
-        .eq("book_id", id)
-        .maybeSingle();
+    let can_read = isFree || subscriptionActive || individuallyPurchased;
 
-      individuallyPurchased = !!data;
+    // Device limit check (only if paid content)
+    if (!isFree) {
+      const { data: devices } = await supabase
+        .from("drm_devices")
+        .select("device_id")
+        .eq("user_id", userId);
+
+      const alreadyRegistered = devices.some(d => d.device_id === device_id);
+
+      if (devices.length >= settings.device_limit && !alreadyRegistered) {
+        can_read = false;
+        return res.json({
+          can_read,
+          reason: "device_limit_exceeded",
+          allowed_devices: devices.length,
+          device_limit: settings.device_limit,
+        });
+      }
     }
-
-    // Final access rule
-    const can_read = isFree || subscriptionActive || individuallyPurchased;
 
     return res.json({
       can_read,
@@ -133,19 +128,13 @@ export const checkDRMAccess = async (req, res) => {
       subscriptionActive,
       individuallyPurchased,
       item_type: isNote ? "note" : "book",
-
-      // DRM flags
-      copy_protection: settings?.copy_protection ?? false,
-      screenshot_prevention: settings?.screenshot_prevention ?? false,
-      watermarking: settings?.watermarking ?? false,
-      device_limit: settings?.device_limit ?? 3,
-       watermarking: settings?.watermarking ?? false,        
-       
-       
-        // watermark text per user (nullable)
-  watermark_text: settings?.watermarking
-    ? (req.user?.email || req.user?.id || "Protected")
-    : null,     
+      copy_protection: settings.copy_protection,
+      screenshot_prevention: settings.screenshot_prevention,
+      watermarking: settings.watermarking,
+      device_limit: settings.device_limit,
+      watermark_text: settings.watermarking
+        ? (req.user.email || req.user.id)
+        : null,
     });
 
   } catch (err) {
@@ -156,6 +145,7 @@ export const checkDRMAccess = async (req, res) => {
     });
   }
 };
+
 export const logAccessEvent = async (req, res) => {
   try {
     const userId = req.user.id;
