@@ -140,7 +140,8 @@ export async function getExam(req, res) {
 export async function attendExam(req, res) {
   try {
     const examId = Number(req.params.id);
-    const userId = req.user?.sub;
+   const userId = req.user?.id;
+
 
     if (!userId) {
       return res.status(401).json({ error: "Unauthorized" });
@@ -202,7 +203,8 @@ export async function attendExam(req, res) {
 /* -------------------- USER: MY SUBMISSIONS -------------------- */
 export async function getUserSubmissions(req, res) {
   try {
-    const userId = req.user?.sub;
+ const userId = req.user?.id;
+
 
     if (!userId) {
       return res.status(401).json({ error: "Unauthorized" });

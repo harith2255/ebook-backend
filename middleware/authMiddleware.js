@@ -4,6 +4,8 @@ dotenv.config();
 const SESSION_TTL_DAYS = 15;
 const SESSION_TTL_MS = 60* 1000; // 1 minute
 
+// middleware/authMiddleware.js
+
 export const verifySupabaseAuth = {
   required: async (req, res, next) => {
     try {
@@ -15,9 +17,11 @@ export const verifySupabaseAuth = {
 
       const token = authHeader.split(" ")[1];
 
+      // ⭐ Correct usage for Supabase v2
       const { data, error } = await supabasePublic.auth.getUser(token);
 
       if (error || !data?.user) {
+        console.log("auth error:", error);
         return res.status(401).json({ error: "jwt_invalid" });
       }
 
@@ -25,10 +29,11 @@ export const verifySupabaseAuth = {
       next();
     } catch (err) {
       console.error("Auth crash:", err);
-      res.status(500).json({ error: "auth_error" });
+      return res.status(500).json({ error: "auth_error" });
     }
   },
 };
+
 
 
 
