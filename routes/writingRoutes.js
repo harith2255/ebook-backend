@@ -13,6 +13,7 @@ import {
   getInterviewMaterials,
   getInterviewMaterialById,
   streamInterviewMaterialPdf,
+  downloadOrderFile,
 } from "../controllers/writingController.js";
 
 import { verifySupabaseAuth } from "../middleware/authMiddleware.js";
@@ -54,6 +55,7 @@ router.get("/feedback/:order_id", getFeedbackForOrder);
 
 router.post("/upload", uploadUserAttachment);
 router.get("/order/:id", getSingleWritingOrder);
+router.get("/orders/:id/download", downloadOrderFile);
 
 /* --------------------------------
    ⚠️ OPTIONAL CATCH ROUTE FOR OTHER IDs

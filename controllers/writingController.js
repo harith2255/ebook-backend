@@ -475,7 +475,7 @@ export const streamInterviewMaterialPdf = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // fetch interview material row
+    // 1️⃣ fetch interview material entry
     const { data, error } = await supabaseAdmin
       .from("interview_materials")
       .select("file_url")
@@ -486,17 +486,83 @@ export const streamInterviewMaterialPdf = async (req, res) => {
       return res.status(404).json({ error: "Interview material not found" });
     }
 
-    // return the direct file URL
+    // file_url is like: admin-1767083451486-E-Book Report.pdf
+    const objectPath = data.file_url;
+
+    // 2️⃣ generate public URL from the bucket
+    const { data: publicFile } = await supabaseAdmin.storage
+      .from("interview_materials")
+      .getPublicUrl(objectPath);
+
+    if (!publicFile?.publicUrl) {
+      return res.status(500).json({ error: "Failed to generate file URL" });
+    }
+
+    // 3️⃣ return usable URL
     return res.json({
-      url: data.file_url,
-      type: "public",          // tell frontend this is not DRM protected yet
+      url: publicFile.publicUrl,  // <-- FIXED usable URL
+      type: "public",
     });
 
   } catch (err) {
     console.error("streamInterviewMaterialPdf error:", err);
-    res.status(500).json({ error: "Internal server error" });
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
 
 
 
+export const downloadOrderFile = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    const { data: order, error } = await supabaseAdmin
+      .from("writing_orders")
+      .select("notes_url, user_id")
+      .eq("id", id)
+      .single();
+
+    if (error || !order) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    if (order.user_id !== userId) {
+      return res.status(403).json({ error: "Unauthorized" });
+    }
+
+    if (!order.notes_url) {
+      return res.status(400).json({ error: "No file available" });
+    }
+
+    // ---------------------------
+    // 🔥 EXTRACT only the object key
+    // ---------------------------
+    const fullUrl = order.notes_url;
+
+    // find marker `/writing_uploads/`
+    const marker = "/writing_uploads/";
+    const idx = fullUrl.indexOf(marker);
+
+    if (idx === -1) {
+      return res.status(500).json({ error: "Invalid stored notes_url format" });
+    }
+
+    const key = decodeURIComponent(fullUrl.substring(idx + marker.length));
+
+    console.log("🗝 Object Key =", key);
+
+    // ---------------------------
+    // Get public URL again (works even if already public)
+    // ---------------------------
+    const { data: publicData } = supabaseAdmin.storage
+      .from("writing_uploads")
+      .getPublicUrl(key);
+
+    return res.json({ url: publicData.publicUrl });
+
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Server error" });
+  }
+};

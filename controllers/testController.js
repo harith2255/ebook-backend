@@ -12,7 +12,7 @@ export const startTest = async (req, res) => {
       return res.status(400).json({ error: "Missing test_id" });
     }
 
-    // 1. Fetch test metadata
+    // 1️⃣ Fetch test metadata
     const { data: test, error: testErr } = await supabase
       .from("mock_tests")
       .select("id, start_time, duration_minutes")
@@ -23,28 +23,33 @@ export const startTest = async (req, res) => {
       return res.status(404).json({ error: "Test not found" });
     }
 
-    // 2. Check schedule
+    // 2️⃣ Check schedule
     if (test.start_time && new Date(test.start_time) > new Date()) {
       return res.status(400).json({ error: "This test has not started yet" });
     }
 
-    // 3. Check previous attempt
+    // 3️⃣ Check previous attempt
     const { data: priorAttempt } = await supabase
       .from("mock_attempts")
-      .select("id, status")
+      .select("id, status, started_at")
       .eq("user_id", user_id)
       .eq("test_id", test_id)
       .maybeSingle();
 
-    // 4. If already in-progress -> resume
+    // 4️⃣ Resume if ongoing
     if (priorAttempt && priorAttempt.status === "in_progress") {
       return res.json({
-        attempt: priorAttempt,
+        attempt: {
+          ...priorAttempt,
+          duration_minutes: test.duration_minutes,  // ⭐ needed for timer
+        },
         already_started: true,
       });
     }
 
-    // 5. Create new attempt (ALWAYS INSERT)
+    // 5️⃣ Create new attempt
+    const startedAt = new Date().toISOString();
+
     const { data: attempt, error: insertErr } = await supabase
       .from("mock_attempts")
       .insert({
@@ -54,7 +59,7 @@ export const startTest = async (req, res) => {
         completed_questions: 0,
         score: 0,
         time_spent: 0,
-        started_at: new Date().toISOString(),
+        started_at: startedAt,
       })
       .select()
       .single();
@@ -64,10 +69,13 @@ export const startTest = async (req, res) => {
       return res.status(400).json({ error: insertErr.message });
     }
 
-
-
-
-    return res.json({ attempt });
+    return res.json({
+      attempt: {
+        ...attempt,
+        duration_minutes: test.duration_minutes, // ⭐ include duration
+      },
+      already_started: false,
+    });
 
   } catch (err) {
     console.error("❌ startTest error", err);
@@ -80,15 +88,31 @@ export const startTest = async (req, res) => {
 /* ==========================================================
    GET QUESTIONS
 ========================================================== */
-/* ==========================================================
-   GET QUESTIONS (dynamic options + explanation)
-========================================================== */
+
 export const getQuestions = async (req, res) => {
   try {
     const { test_id } = req.params;
+    const attempt_id = req.headers["x-attempt-id"]; 
 
-    console.log("📌 Incoming Test ID:", test_id);
+    if (!attempt_id) {
+      return res.status(400).json({ error: "Missing attempt id" });
+    }
 
+    // 1️⃣ fetch attempt info for timer
+    const { data: attempt, error: attemptErr } = await supabase
+      .from("mock_attempts")
+      .select(`
+        started_at,
+        mock_tests!inner(duration_minutes)
+      `)
+      .eq("id", attempt_id)
+      .maybeSingle();
+
+    if (attemptErr || !attempt) {
+      return res.status(400).json({ error: "Attempt not found" });
+    }
+
+    // 2️⃣ fetch questions
     const { data, error } = await supabase
       .from("mock_test_questions")
       .select(`
@@ -105,48 +129,31 @@ export const getQuestions = async (req, res) => {
       .eq("test_id", test_id)
       .order("id");
 
-    console.log("📥 Raw DB Data:", data);
-    console.log("⚠️ DB Error:", error);
-
     if (error) {
-      console.error("❌ Supabase error in getQuestions:", error);
       return res.status(400).json({ error: error.message });
     }
 
-    if (!data || data.length === 0) {
-      console.warn("⚠️ No questions found for test:", test_id);
-      return res.json({ mock_test_questions: [] });
-    }
+    const questions = data.map(q => ({
+      id: q.id,
+      question: q.question,
+      options: [q.option_a, q.option_b, q.option_c, q.option_d, q.option_e].filter(Boolean),
+      correct_option: q.correct_option,
+      explanation: q.explanation || ""
+    }));
 
-    const formatted = data.map((q) => {
-      console.log("➡️ Processing Question:", q.id, "Explanation:", q.explanation);
-
-      return {
-        id: q.id,
-        question: q.question,
-        options: [
-          q.option_a,
-          q.option_b,
-          q.option_c,
-          q.option_d,
-          q.option_e
-        ].filter(Boolean),
-        correct_option: q.correct_option,
-        explanation: q.explanation || ""   // add fallback
-      };
-    });
-
-    console.log("📤 Final formatted questions:", formatted);
-
+    // 3️⃣ SEND EVERYTHING TO FRONTEND
     return res.json({
-      mock_test_questions: formatted,
+      mock_test_questions: questions,
+      duration_minutes: attempt.mock_tests.duration_minutes, // ⭐ NECESSARY
+      started_at: attempt.started_at                         // ⭐ NECESSARY
     });
 
   } catch (err) {
-    console.error("🔥 CRITICAL getQuestions ERROR:", err);
+    console.error("🔥 getQuestions ERROR:", err);
     return res.status(500).json({ error: err.message });
   }
 };
+
 
 
 
@@ -314,18 +321,38 @@ export const getAttemptStatus = async (req, res) => {
 
     const { data, error } = await supabase
       .from("mock_attempts")
-      .select("*")
+      .select(`
+        id,
+        user_id,
+        test_id,
+        status,
+        started_at,
+        mock_tests!inner (
+          duration_minutes
+        )
+      `)
       .eq("id", attempt_id)
-      .single();
+      .maybeSingle();
 
-    if (error) return res.status(400).json({ error: error.message });
+    if (error || !data) {
+      return res.status(404).json({ error: "Attempt not found" });
+    }
 
-    return res.json(data || {});
+    return res.json({
+      id: data.id,
+      test_id: data.test_id,
+      started_at: data.started_at,
+      duration_minutes: data.mock_tests.duration_minutes,  // <-- FIXED
+      status: data.status
+    });
+
   } catch (err) {
     console.error("❌ getAttemptStatus error", err);
     return res.status(500).json({ error: err.message });
   }
 };
+
+
 
 /* ==========================================================
    SCORE CALCULATION
