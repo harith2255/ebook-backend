@@ -1,24 +1,25 @@
-// drmCheck.js (FINAL VERSION)
 import supabase from "../utils/supabaseClient.js";
 
 export const drmCheck = async (req, res, next) => {
   try {
     const userId = req.user?.id;
-    const deviceInfo = req.headers["user-agent"];
+    const deviceInfo =
+      req.headers["x-device-id"] ||
+      req.body.device_id ||
+      req.headers["user-agent"];
+
     const ip = req.ip;
 
-   const bookId =
-  req.params.bookId ||
-  req.params.id ||
-  req.body.book_id ||
-  req.body.bookId;
+    const bookId =
+      req.params.id ||
+      req.body.book_id ||
+      req.body.bookId;
 
-const noteId =
-  req.params.noteId ||
-  req.params.id ||
-  req.body.note_id ||
-  req.body.noteId;
-
+    const noteId =
+      req.params.noteId ||
+      req.params.id ||
+      req.body.note_id ||
+      req.body.noteId;
 
     /* ======================================================
        1) LOAD DRM SETTINGS
@@ -32,24 +33,28 @@ const noteId =
     /* ======================================================
        2) CHECK SUBSCRIPTION
     ====================================================== */
-// 2) CHECK SUBSCRIPTION — only if NOT suspended
-let subscriptionActive = false;
+    let subscriptionActive = false;
 
-if (subscription && subscription.status === "active") {
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("account_status")
-    .eq("id", userId)
-    .single();
+    const { data: subscription } = await supabase
+      .from("subscriptions")
+      .select("status")
+      .eq("user_id", userId)
+      .maybeSingle();
 
-  if (profile?.account_status !== "suspended") {
-    subscriptionActive = true;
-  }
-}
+    if (subscription?.status === "active") {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("account_status")
+        .eq("id", userId)
+        .single();
 
+      if (profile?.account_status !== "suspended") {
+        subscriptionActive = true;
+      }
+    }
 
     /* ======================================================
-       3) CHECK BOOK PURCHASE (IMPORTANT!)
+       3) CHECK BOOK PURCHASE
     ====================================================== */
     let hasPurchasedBook = false;
 
@@ -81,11 +86,18 @@ if (subscription && subscription.status === "active") {
     }
 
     /* ======================================================
+       🔍 DEBUG (NOW SAFE!)
+    ====================================================== */
+    console.log("🔍 DRM DEBUG");
+    console.log("userId:", userId);
+    console.log("bookId:", bookId);
+    console.log("subscriptionActive:", subscriptionActive);
+    console.log("hasPurchasedBook:", hasPurchasedBook);
+    console.log("hasPurchasedNote:", hasPurchasedNote);
+    console.log("-------------------------------------");
+
+    /* ======================================================
        5) ACCESS RULE
-          ALLOW if:
-          - user purchased THIS book, OR
-          - user purchased THIS note, OR
-          - user has active subscription
     ====================================================== */
     if (!hasPurchasedBook && !hasPurchasedNote && !subscriptionActive) {
       return res.status(403).json({
@@ -125,11 +137,7 @@ if (subscription && subscription.status === "active") {
       created_at: new Date(),
     });
 
-    
-
-    // Pass DRM settings to handlers
     req.drm = drm;
-
     next();
   } catch (err) {
     console.error("drmCheck error:", err);

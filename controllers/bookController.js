@@ -52,14 +52,23 @@ export const getAllBooks = async (req, res) => {
 /* ============================
    GET BOOK BY ID
 ============================= */
+
 export const getBookById = async (req, res) => {
   try {
-    const { id } = req.params;
+    const { id } = req.params; // UUID of ebook
 
     const { data: book, error } = await supabase
       .from("ebooks")
       .select(`
-        *,
+        id,
+        title,
+        author,
+        description,
+        price,
+        file_url,
+        rating,
+        reviews,
+        sales,
         categories (
           id,
           name,
@@ -67,17 +76,18 @@ export const getBookById = async (req, res) => {
         )
       `)
       .eq("id", id)
-       .maybeSingle(); // ✔ safe
+      .maybeSingle();
 
     if (error) throw error;
     if (!book) return res.status(404).json({ error: "Book not found" });
 
-    res.json({ book });
+    return res.json({ book });
   } catch (err) {
     console.error("getBookById error:", err);
-    res.status(404).json({ error: "Book not found" });
+    return res.status(500).json({ error: "Book fetch failed" });
   }
 };
+
 
 
 /* ============================

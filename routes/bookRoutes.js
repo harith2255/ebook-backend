@@ -31,6 +31,6 @@ router.post(
 router.get("/:id", verifySupabaseAuth.required, getBookById);
 
 // Log a book reading event
-router.post("/read", verifySupabaseAuth.required, drmCheck, logBookRead);
+router.post("/read", verifySupabaseAuth.required, logBookRead);
 
 export default router;
