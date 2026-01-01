@@ -191,6 +191,7 @@ if (rawCategory) {
     title,
     category: rawCategory?.trim() || null, // ✅ FIX
     author,
+     user_id: req.user?.id || null,
     pages: pageCount,
     downloads: 0,
     rating: 0,
