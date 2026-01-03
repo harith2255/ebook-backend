@@ -349,55 +349,7 @@ export const createWritingOrder = async (req, res) => {
 
 
 
-export const verifyWritingPayment = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const { amount, method, order_temp_id } = req.body;
 
-    if (!amount || !order_temp_id) {
-      return res.status(400).json({ error: "Amount and temp ID required" });
-    }
-
-    // Insert into transactions
-    const { data: txData, error: txErr } = await supabase
-      .from("payments_transactions")
-      .insert([
-        {
-          user_id: userId,
-          amount,
-          status: "completed",
-          method: method || "test-payment",
-          description: `writing_service:${order_temp_id}`,
-          external_ref: order_temp_id,
-          created_at: new Date(),
-        },
-      ])
-      .select()
-      .single();
-
-    if (txErr) throw txErr;
-
-    // Insert revenue
-    const { error: revenueErr } = await supabase
-      .from("revenue") // make sure table exists
-      .insert([
-        {
-          user_id: userId,
-          amount,
-          item_type: "writing_service",
-          created_at: new Date(),
-        },
-      ]);
-
-    if (revenueErr) throw revenueErr;
-
-    return res.json({ success: true, transaction: txData });
-
-  } catch (err) {
-    console.error("verifyWritingPayment ERROR:", err);
-    return res.status(500).json({ error: "Payment verification failed" });
-  }
-};
 
 
 

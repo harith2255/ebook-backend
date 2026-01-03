@@ -75,7 +75,7 @@ if (profile?.account_status === "suspended") {
   item_type: "subscription",
   item_id: null,            // must be null
   old_item_id: plan.id,     // numeric
-  payment_id: null,
+  payment_id: razorpay_payment_id || null,
   created_at: new Date().toISOString(),
 });
 

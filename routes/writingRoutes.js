@@ -9,7 +9,7 @@ import {
   getFeedbackForOrder,
   uploadUserAttachment,
   getSingleWritingOrder,
-  verifyWritingPayment,
+
   getInterviewMaterials,
   getInterviewMaterialById,
   streamInterviewMaterialPdf,
@@ -43,7 +43,7 @@ router.get("/interview-materials/:id", getInterviewMaterialById);
 /* --------------------------------
    WRITING ORDER ROUTES
 ---------------------------------- */
-router.post("/payments/verify", verifyWritingPayment);
+
 router.post("/order", createWritingOrder);
 
 router.get("/orders/active", getActiveOrders);

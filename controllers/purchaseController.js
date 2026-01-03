@@ -55,6 +55,17 @@ if (profile?.account_status === "suspended") {
           continue;
         }
 
+if (item.type === "subscription") {
+  await processSubscriptionPurchase(userId, item.id);
+  results.push({ type: "subscription", id: item.id, purchased: true });
+  continue;
+}
+
+if (item.type === "writing") {
+  await processWritingPurchase(userId, item.payload);
+  results.push({ type: "writing", purchased: true });
+  continue;
+}
         // 📚 BOOK PURCHASE
         if (item.type === "book") {
           // book IDs should be UUIDs (ebooks.id)
@@ -142,6 +153,47 @@ if (profile?.account_status === "suspended") {
     return res.status(500).json({ error: "Server error processing purchase" });
   }
 };
+async function processSubscriptionPurchase(userId, planId) {
+  const { data: plan } = await supabase
+    .from("subscription_plans")
+    .select("*")
+    .eq("id", planId)
+    .single();
+
+  if (!plan) throw new Error("Invalid plan");
+
+  const now = new Date();
+  const expiresAt =
+    plan.period === "monthly"
+      ? new Date(now.setMonth(now.getMonth() + 1))
+      : new Date(now.setFullYear(now.getFullYear() + 1));
+
+  // expire old
+  await supabase
+    .from("user_subscriptions")
+    .update({ status: "expired" })
+    .eq("user_id", userId)
+    .eq("status", "active");
+
+  // create new
+  await supabase.from("user_subscriptions").insert({
+    user_id: userId,
+    plan_id: plan.id,
+    started_at: new Date().toISOString(),
+    expires_at: expiresAt.toISOString(),
+    status: "active",
+  });
+}
+async function processWritingPurchase(userId, payload) {
+  await supabase.from("writing_orders").insert({
+    ...payload,
+    user_id: userId,
+    payment_success: true,
+    payment_status: "Paid",
+    paid_at: new Date().toISOString(),
+    status: "Pending",
+  });
+}
 
 /* ============================================================
    2️⃣ PROCESS BOOK PURCHASE — book_sales + user_library + REVENUE
@@ -221,7 +273,8 @@ async function processBookPurchase(userId, bookId) {
     item_id: bookId,      // uuid
     old_item_id: null,    // not used for books
     created_at: new Date().toISOString(),
-    payment_id: null,     // fill later if gateway is added
+   payment_id: razorpay_payment_id || null
+     // fill later if gateway is added
   });
 
   if (revErr) {
@@ -282,7 +335,8 @@ async function processNotePurchase(userId, noteId) {
     item_id: null,          // avoid uuid error
     old_item_id: numericId, // integer
     created_at: new Date().toISOString(),
-    payment_id: null,
+   payment_id: razorpay_payment_id || null
+
   });
 
   if (revErr) {
