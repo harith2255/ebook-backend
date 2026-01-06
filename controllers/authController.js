@@ -30,26 +30,7 @@ export async function register(req, res) {
     const userId = authData.user.id;
 
 
-   /* 2️⃣ UPSERT PROFILE (SAFE) */
-const { error: profileUpsertError } = await supabaseAdmin
-  .from("profiles")
-  .upsert({
-    id: userId,
-    email,
-    first_name,
-    last_name,
-    full_name,
-    plan: "free",
-    status: "active",
-    role: "User",
-  });
 
-if (profileUpsertError) {
-  console.error("Profile upsert error:", profileUpsertError);
-  return res.status(500).json({
-    error: "Database error creating new user",
-  });
-}
 
 
 
