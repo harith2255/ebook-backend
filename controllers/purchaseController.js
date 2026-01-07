@@ -6,6 +6,7 @@ import { validate as isUUID } from "uuid";
    POST /api/purchases/unified
    Body: { items: [{ id, type: "book" | "note" }] }
 =============================================================== */
+
 export const unifiedPurchase = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -16,6 +17,13 @@ const { data: profile, error: profileErr } = await supabase
   .select("account_status")
   .eq("id", userId)
   .single();
+const { payment } = req.body;
+
+if (!payment || !payment.payment_id) {
+  return res.status(402).json({
+    error: "Payment required before purchase"
+  });
+}
 
 if (profileErr) {
   return res.status(500).json({ error: "Failed to fetch account" });
@@ -56,10 +64,16 @@ if (profile?.account_status === "suspended") {
         }
 
 if (item.type === "subscription") {
+  if (!payment?.payment_id) {
+    throw new Error("Subscription requires successful payment");
+  }
+
   await processSubscriptionPurchase(userId, item.id);
   results.push({ type: "subscription", id: item.id, purchased: true });
   continue;
 }
+
+
 
 if (item.type === "writing") {
   await processWritingPurchase(userId, item.payload);
@@ -273,7 +287,7 @@ async function processBookPurchase(userId, bookId) {
     item_id: bookId,      // uuid
     old_item_id: null,    // not used for books
     created_at: new Date().toISOString(),
-   payment_id: razorpay_payment_id || null
+   payment_id: payment?.payment_id || null
      // fill later if gateway is added
   });
 
@@ -335,7 +349,7 @@ async function processNotePurchase(userId, noteId) {
     item_id: null,          // avoid uuid error
     old_item_id: numericId, // integer
     created_at: new Date().toISOString(),
-   payment_id: razorpay_payment_id || null
+   payment_id: payment?.payment_id || null
 
   });
 

@@ -8,7 +8,9 @@ import supabase from "../utils/supabaseClient.js";
 export const upgradeSubscription = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { planId } = req.body;
+   const { planId, payment } = req.body;
+
+const paymentId = payment?.payment_id || null;
 
     if (!planId) {
       return res.status(400).json({ error: "planId required" });
@@ -75,7 +77,7 @@ if (profile?.account_status === "suspended") {
   item_type: "subscription",
   item_id: null,            // must be null
   old_item_id: plan.id,     // numeric
-  payment_id: razorpay_payment_id || null,
+payment_id: paymentId,
   created_at: new Date().toISOString(),
 });
 
