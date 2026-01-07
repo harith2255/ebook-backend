@@ -19,11 +19,9 @@ const { data: profile, error: profileErr } = await supabase
   .single();
 const { payment } = req.body;
 
-if (!payment || !payment.payment_id) {
-  return res.status(402).json({
-    error: "Payment required before purchase"
-  });
-}
+// payment is OPTIONAL (required only for paid items)
+const paymentId = payment?.payment_id || null;
+
 
 if (profileErr) {
   return res.status(500).json({ error: "Failed to fetch account" });
@@ -92,7 +90,12 @@ if (item.type === "writing") {
             continue;
           }
 
-          const result = await processBookPurchase(userId, item.id);
+         const result = await processBookPurchase(
+  userId,
+  item.id,
+  paymentId // null for FREE books
+);
+
 
           // remove from cart
           await supabase
@@ -214,7 +217,8 @@ async function processWritingPurchase(userId, payload) {
    - bookId is UUID (ebooks.id)
    - revenue.item_id = bookId (UUID)
 =============================================================== */
-async function processBookPurchase(userId, bookId) {
+async function processBookPurchase(userId, bookId, paymentId = null)
+ {
   if (!isUUID(userId)) throw new Error("Invalid userId");
   if (!isUUID(bookId)) throw new Error("Invalid bookId");
 
@@ -238,7 +242,13 @@ async function processBookPurchase(userId, bookId) {
 
   if (priceErr) throw priceErr;
 
-  const price = Number(bookRow?.price) || 0;
+ const price = Number(bookRow?.price) || 0;
+
+// 🚫 Paid book without payment → block
+if (price > 0 && !paymentId) {
+  throw new Error("Payment required for paid book");
+}
+
 
   // 3) Insert into book_sales
   // ⚠️ IMPORTANT: book_sales.id is probably bigint/uuid with DEFAULT
@@ -330,6 +340,11 @@ async function processNotePurchase(userId, noteId) {
   if (priceErr) throw priceErr;
 
   const price = Number(noteRow?.price) || 0;
+
+  // 🚫 Paid book without payment → block
+if (price > 0 && !paymentId) {
+  throw new Error("Payment required for paid note");
+}
 
   // 3) Insert into notes_purchase
   // notes_purchase.id is likely bigint/uuid with DEFAULT -> don't send id
