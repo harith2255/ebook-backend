@@ -1,38 +1,33 @@
-import supabase from "../utils/supabaseClient.js";
-
 export const drmCheck = async (req, res, next) => {
   try {
     const userId = req.user?.id;
-    const deviceInfo =
-      req.headers["x-device-id"] ||
-      req.body.device_id ||
-      req.headers["user-agent"];
+    if (!userId) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
 
-    const ip = req.ip;
+    const deviceInfo = req.headers["x-device-id"];
+    if (!deviceInfo) {
+      return res.status(400).json({ error: "missing_device_id" });
+    }
 
-    const bookId =
-      req.params.id ||
-      req.body.book_id ||
-      req.body.bookId;
+    const bookId = req.query.book_id || req.body.book_id || null;
+    const noteId = req.query.note_id || req.body.note_id || null;
 
-    const noteId =
-      req.params.noteId ||
-      req.params.id ||
-      req.body.note_id ||
-      req.body.noteId;
+    // ✅ EXACTLY ONE
+    if (!!bookId === !!noteId) {
+      return res.status(400).json({
+        error: "invalid_item_identifier",
+      });
+    }
 
-    /* ======================================================
-       1) LOAD DRM SETTINGS
-    ====================================================== */
+    /* ================= DRM SETTINGS ================= */
     const { data: drm } = await supabase
       .from("drm_settings")
       .select("*")
       .eq("id", 1)
       .single();
 
-    /* ======================================================
-       2) CHECK SUBSCRIPTION
-    ====================================================== */
+    /* ================= SUBSCRIPTION ================= */
     let subscriptionActive = false;
 
     const { data: subscription } = await supabase
@@ -53,94 +48,69 @@ export const drmCheck = async (req, res, next) => {
       }
     }
 
-    /* ======================================================
-       3) CHECK BOOK PURCHASE
-    ====================================================== */
-    let hasPurchasedBook = false;
+    /* ================= PURCHASE ================= */
+    let individuallyPurchased = false;
 
     if (bookId) {
-      const { data: bookPurchase } = await supabase
+      const { data } = await supabase
         .from("book_sales")
         .select("id")
         .eq("user_id", userId)
         .eq("book_id", bookId)
         .maybeSingle();
 
-      hasPurchasedBook = !!bookPurchase;
+      individuallyPurchased = !!data;
     }
 
-    /* ======================================================
-       4) CHECK NOTE PURCHASE
-    ====================================================== */
-    let hasPurchasedNote = false;
-
     if (noteId) {
-      const { data: notePurchase } = await supabase
+      const { data } = await supabase
         .from("notes_purchase")
         .select("id")
         .eq("user_id", userId)
         .eq("note_id", noteId)
         .maybeSingle();
 
-      hasPurchasedNote = !!notePurchase;
+      individuallyPurchased = !!data;
     }
 
-    /* ======================================================
-       🔍 DEBUG (NOW SAFE!)
-    ====================================================== */
-    console.log("🔍 DRM DEBUG");
-    console.log("userId:", userId);
-    console.log("bookId:", bookId);
-    console.log("subscriptionActive:", subscriptionActive);
-    console.log("hasPurchasedBook:", hasPurchasedBook);
-    console.log("hasPurchasedNote:", hasPurchasedNote);
-    console.log("-------------------------------------");
-
-    /* ======================================================
-       5) ACCESS RULE
-    ====================================================== */
-    if (!hasPurchasedBook && !hasPurchasedNote && !subscriptionActive) {
+    if (!subscriptionActive && !individuallyPurchased) {
       return res.status(403).json({
-        error: "Access denied. Purchase or subscription required.",
+        error: "no_valid_access",
       });
     }
 
-    /* ======================================================
-       6) DEVICE LIMIT CHECK
-    ====================================================== */
-    const { data: logs } = await supabase
-      .from("drm_access_logs")
-      .select("device_info")
+    /* ================= DEVICE LIMIT ================= */
+    const { data: devices } = await supabase
+      .from("drm_devices")
+      .select("device_id")
       .eq("user_id", userId);
 
-    const uniqueDevices = [...new Set((logs || []).map((l) => l.device_info))];
+    const knownDevices = devices?.map(d => d.device_id) || [];
 
     if (
       drm?.device_limit &&
-      uniqueDevices.length >= drm.device_limit &&
-      !uniqueDevices.includes(deviceInfo)
+      knownDevices.length >= drm.device_limit &&
+      !knownDevices.includes(deviceInfo)
     ) {
-      return res.status(403).json({ error: "Device limit reached" });
+      return res.status(403).json({
+        error: "device_limit_exceeded",
+      });
     }
 
-    /* ======================================================
-       7) LOG ACCESS
-    ====================================================== */
-    await supabase.from("drm_access_logs").insert({
-      user_id: userId,
-      user_name: req.user?.email || "Unknown",
-      book_id: bookId || null,
-      note_id: noteId || null,
-      action: "view",
-      device_info: deviceInfo,
-      ip_address: ip,
-      created_at: new Date(),
-    });
+    /* ================= REGISTER DEVICE ================= */
+    await supabase.from("drm_devices").upsert(
+      {
+        user_id: userId,
+        device_id: deviceInfo,
+        created_at: new Date(),
+      },
+      { onConflict: "user_id,device_id" }
+    );
 
     req.drm = drm;
     next();
   } catch (err) {
-    console.error("drmCheck error:", err);
-    return res.status(500).json({ error: "DRM check failed" });
+    console.error("❌ drmCheck error:", err);
+    return res.status(500).json({ error: "drm_failed" });
   }
 };

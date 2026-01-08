@@ -21,43 +21,32 @@ const router = express.Router();
 /* ============================
    PUBLIC ROUTES
 ============================= */
-
-// Public notes listing
 router.get("/", getAllNotes);
+router.get("/:id/preview-pdf", getNotePreviewPdf);
 
 /* ============================
    PROTECTED ROUTES
 ============================= */
-
-// Get user's purchased notes
 router.get("/purchased/all", verifySupabaseAuth.required, getPurchasedNotes);
-
-// Get user's download history
 router.get("/downloaded", verifySupabaseAuth.required, getDownloadedNotes);
 
-// Download a note (increments download count)
+// 🔐 DRM ONLY FOR DOWNLOAD
 router.post(
   "/:id/download",
   verifySupabaseAuth.required,
   drmCheck,
   incrementDownloads
 );
-// routes/notes.js
-router.get("/:id/preview-pdf", getNotePreviewPdf);
-// Get note details + DRM
+
+// Reading metadata (NO DRM)
 router.get("/:id", verifySupabaseAuth.required, getNoteById);
 
-// Note Highlights
+// Highlights (NO DRM)
 router.get("/highlights/:id", verifySupabaseAuth.required, getNoteHighlights);
 router.post("/highlights", verifySupabaseAuth.required, addNoteHighlight);
-router.delete(
-  "/highlights/:id",
-  verifySupabaseAuth.required,
-  deleteNoteHighlight
-);
+router.delete("/highlights/:id", verifySupabaseAuth.required, deleteNoteHighlight);
 
-
-// Last page tracking
+// Last page (NO DRM)
 router.get("/lastpage/:id", verifySupabaseAuth.required, getNoteLastPage);
 router.put("/lastpage/:id", verifySupabaseAuth.required, saveNoteLastPage);
 

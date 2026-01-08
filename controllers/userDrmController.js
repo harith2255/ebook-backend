@@ -1,38 +1,15 @@
 import supabase from "../utils/supabaseClient.js";
+export function getDeviceId() {
+  let deviceId = localStorage.getItem("device_id");
 
-/* ======================================================
-   REGISTER DEVICE
-====================================================== */
-export const registerDevice = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const { device_id } = req.body;
-
-    if (!device_id)
-      return res.status(400).json({ error: "device_id required" });
-
-    const { data, error } = await supabase
-      .from("drm_devices")
-      .upsert(
-        {
-          user_id: userId,
-          device_id,
-          created_at: new Date(),
-        },
-        { onConflict: "user_id,device_id" } // <-- tell Supabase which fields are unique
-      );
-
-    if (error) {
-      console.error("upsert error:", error);
-      return res.status(500).json({ error: "Failed to register device" });
-    }
-
-    return res.json({ message: "Device registered", data });
-  } catch (err) {
-    console.error("registerDevice error:", err);
-    return res.status(500).json({ error: "Failed to register device" });
+  if (!deviceId) {
+    deviceId = crypto.randomUUID();
+    localStorage.setItem("device_id", deviceId);
   }
-};
+
+  return deviceId;
+}
+
 
 
 /* ======================================================
@@ -44,10 +21,21 @@ export const registerDevice = async (req, res) => {
 export const checkDRMAccess = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { book_id, note_id, device_id } = req.query;
+ const { book_id, note_id } = req.query;
+const device_id = req.headers["x-device-id"] ?? null;
 
-    const id = book_id || note_id;
-    const isNote = !!note_id;
+
+
+if (!!book_id === !!note_id) {
+  return res.json({
+    can_read: false,
+    reason: "invalid_item_identifier", // must send exactly ONE
+  });
+}
+
+const isNote = !!note_id;
+const id = isNote ? note_id : book_id;
+
 
     if (!device_id)
       return res.json({ can_read: false, reason: "missing_device_id" });
@@ -99,44 +87,47 @@ export const checkDRMAccess = async (req, res) => {
 
     const individuallyPurchased = !!purchased;
 
-    let can_read = isFree || subscriptionActive || individuallyPurchased;
+if (isFree) {
+  return res.json({
+    can_read: true,
+    reason: null,
+    isFree: true,
+    subscriptionActive,
+    individuallyPurchased,
+    item_type: isNote ? "note" : "book",
+    copy_protection: settings.copy_protection,
+    screenshot_prevention: settings.screenshot_prevention,
+    watermarking: settings.watermarking,
+    device_limit: settings.device_limit,
+    watermark_text: settings.watermarking
+      ? (req.user.email || req.user.id)
+      : null,
+  });
+}
+
+let can_read = subscriptionActive || individuallyPurchased;
+
 
     // Device limit check (only if paid content)
     if (!isFree) {
-      const { data: devices } = await supabase
-        .from("drm_devices")
-        .select("device_id")
-        .eq("user_id", userId);
+    let can_read = isFree || subscriptionActive || individuallyPurchased;
 
-      const alreadyRegistered = devices.some(d => d.device_id === device_id);
-
-      if (devices.length >= settings.device_limit && !alreadyRegistered) {
-        can_read = false;
-        return res.json({
-          can_read,
-          reason: "device_limit_exceeded",
-          allowed_devices: devices.length,
-          device_limit: settings.device_limit,
-        });
-      }
+return res.json({
+  can_read,
+  reason: can_read ? null : "no_valid_access",
+  isFree,
+  subscriptionActive,
+  individuallyPurchased,
+  item_type: isNote ? "note" : "book",
+  copy_protection: settings.copy_protection,
+  screenshot_prevention: settings.screenshot_prevention,
+  watermarking: settings.watermarking,
+  device_limit: settings.device_limit,
+  watermark_text: settings.watermarking
+    ? (req.user.email || req.user.id)
+    : null,
+});
     }
-
-    return res.json({
-      can_read,
-      reason: can_read ? null : "no_valid_access",
-      isFree,
-      subscriptionActive,
-      individuallyPurchased,
-      item_type: isNote ? "note" : "book",
-      copy_protection: settings.copy_protection,
-      screenshot_prevention: settings.screenshot_prevention,
-      watermarking: settings.watermarking,
-      device_limit: settings.device_limit,
-      watermark_text: settings.watermarking
-        ? (req.user.email || req.user.id)
-        : null,
-    });
-
   } catch (err) {
     console.error("checkDRMAccess error:", err);
     return res.json({

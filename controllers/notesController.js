@@ -107,6 +107,21 @@ export const getNoteById = async (req, res) => {
 
     const isFree = note.price === 0 || note.price === "Free";
 
+   if (isFree && userId) {
+  await supabase.from("notes_purchase").upsert(
+    {
+      user_id: userId,
+      note_id: noteId,
+      purchased_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id,note_id" }
+  );
+
+  isPurchased = true;
+}
+
+
+
     // 🔐 Only expose file_url if user can access full note
     const safeNote = {
       ...note,
