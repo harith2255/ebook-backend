@@ -113,6 +113,57 @@ if (!!book_id === !!note_id) {
   }
 };
 
+/* ======================================================
+   REGISTER DEVICE
+====================================================== */
+export const registerDevice = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { device_id } = req.body;
+
+    if (!device_id) {
+      return res.status(400).json({ error: "device_id required" });
+    }
+
+    // Check if device already registered
+    const { data: existing } = await supabase
+      .from("user_devices")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("device_id", device_id)
+      .maybeSingle();
+
+    if (existing) {
+      // update last active
+      await supabase
+        .from("user_devices")
+        .update({ last_active: new Date() })
+        .eq("id", existing.id);
+      
+      return res.json({ success: true, registered: false });
+    }
+
+    // Register new device
+    const { error } = await supabase.from("user_devices").insert({
+      user_id: userId,
+      device_id,
+      device_name: req.headers["user-agent"] || "Unknown Device",
+      last_active: new Date(),
+    });
+
+    if (error) {
+      console.error("registerDevice insert error:", error);
+      // specific constraint error handling could go here
+      return res.status(500).json({ error: "Failed to register" });
+    }
+
+    return res.json({ success: true, registered: true });
+  } catch (err) {
+    console.error("registerDevice error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+};
+
 export const logAccessEvent = async (req, res) => {
   try {
     const userId = req.user.id;
