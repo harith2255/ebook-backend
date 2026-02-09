@@ -64,9 +64,10 @@ const id = isNote ? note_id : book_id;
     if (!itemRow)
       return res.json({ can_read: false, reason: "item_not_found" });
 
+    // 3. Consolidated Access Check
     const isFree = Number(itemRow.price) === 0;
-
-    // Subscription check
+    
+    // Check Subscription
     const { data: subscription } = await supabase
       .from("subscriptions")
       .select("id")
@@ -74,9 +75,7 @@ const id = isNote ? note_id : book_id;
       .eq("status", "active")
       .maybeSingle();
 
-    const subscriptionActive = !!subscription;
-
-    // Individual purchase check
+    // Check Individual Purchase
     const purchaseTable = isNote ? "notes_purchase" : "book_sales";
     const { data: purchased } = await supabase
       .from(purchaseTable)
@@ -85,49 +84,23 @@ const id = isNote ? note_id : book_id;
       .eq(isNote ? "note_id" : "book_id", id)
       .maybeSingle();
 
-    const individuallyPurchased = !!purchased;
+    const canRead = isFree || !!subscription || !!purchased;
 
-if (isFree) {
-  return res.json({
-    can_read: true,
-    reason: null,
-    isFree: true,
-    subscriptionActive,
-    individuallyPurchased,
-    item_type: isNote ? "note" : "book",
-    copy_protection: settings.copy_protection,
-    screenshot_prevention: settings.screenshot_prevention,
-    watermarking: settings.watermarking,
-    device_limit: settings.device_limit,
-    watermark_text: settings.watermarking
-      ? (req.user.email || req.user.id)
-      : null,
-  });
-}
-
-let can_read = subscriptionActive || individuallyPurchased;
-
-
-    // Device limit check (only if paid content)
-    if (!isFree) {
-    let can_read = isFree || subscriptionActive || individuallyPurchased;
-
-return res.json({
-  can_read,
-  reason: can_read ? null : "no_valid_access",
-  isFree,
-  subscriptionActive,
-  individuallyPurchased,
-  item_type: isNote ? "note" : "book",
-  copy_protection: settings.copy_protection,
-  screenshot_prevention: settings.screenshot_prevention,
-  watermarking: settings.watermarking,
-  device_limit: settings.device_limit,
-  watermark_text: settings.watermarking
-    ? (req.user.email || req.user.id)
-    : null,
-});
-    }
+    return res.json({
+      can_read: canRead,
+      reason: canRead ? null : "no_valid_access",
+      isFree,
+      subscriptionActive: !!subscription,
+      individuallyPurchased: !!purchased,
+      item_type: isNote ? "note" : "book",
+      copy_protection: settings.copy_protection,
+      screenshot_prevention: settings.screenshot_prevention,
+      watermarking: settings.watermarking,
+      device_limit: settings.device_limit,
+      watermark_text: settings.watermarking
+        ? (req.user.email || req.user.id)
+        : null,
+    });
   } catch (err) {
     console.error("checkDRMAccess error:", err);
     return res.json({
