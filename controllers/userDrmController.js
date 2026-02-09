@@ -22,7 +22,7 @@ export const checkDRMAccess = async (req, res) => {
   try {
     const userId = req.user.id;
  const { book_id, note_id } = req.query;
-const device_id = req.headers["x-device-id"] ?? null;
+const device_id = req.headers["x-device-id"] ?? req.query.device_id ?? null;
 
 
 
@@ -33,9 +33,10 @@ if (!!book_id === !!note_id) {
   });
 }
 
-const isNote = !!note_id;
-const id = isNote ? note_id : book_id;
+    const isNote = !!note_id;
+    const id = isNote ? note_id : book_id;
 
+    console.log("🔍 checkDRMAccess called:", { userId, book_id, note_id, id, device_id });
 
     if (!device_id)
       return res.json({ can_read: false, reason: "missing_device_id" });
@@ -83,6 +84,8 @@ const id = isNote ? note_id : book_id;
       .eq("user_id", userId)
       .eq(isNote ? "note_id" : "book_id", id)
       .maybeSingle();
+
+    console.log("🛒 Purchase Check Result:", { purchased, isNote, id });
 
     const canRead = isFree || !!subscription || !!purchased;
 
