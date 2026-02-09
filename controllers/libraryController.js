@@ -864,6 +864,7 @@ export const resetReading = async (req, res) => {
 
   res.json({ message: "Reading reset" });
 };
+
 export const removeBookFromAllCollections = async (req, res) => {
   try {
     const { bookId } = req.params;
@@ -880,5 +881,122 @@ export const removeBookFromAllCollections = async (req, res) => {
   } catch (err) {
     console.error("removeBookFromAllCollections error:", err);
     return res.status(500).json({ error: "Failed to remove from all collections" });
+  }
+};
+
+/* ============================================
+   🆓 CLAIM FREE PRODUCTS (₹0)
+============================================ */
+export const claimFreeProducts = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const { items } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: "No items provided" });
+    }
+
+    console.log("🆓 Claiming free products:", { userId, items });
+
+    const results = [];
+    const errors = [];
+
+    for (const item of items) {
+      try {
+        const { id, type } = item;
+
+        // Only support books and notes for now
+        if (type !== "book" && type !== "note") {
+          errors.push({ id, error: `Unsupported type: ${type}` });
+          continue;
+        }
+
+        // Verify the product is actually free
+        const tableName = type === "book" ? "ebooks" : "notes";
+        const { data: product, error: productErr } = await supabase
+          .from(tableName)
+          .select("id, price, title")
+          .eq("id", id)
+          .single();
+
+        if (productErr || !product) {
+          errors.push({ id, error: "Product not found" });
+          continue;
+        }
+
+        if (Number(product.price) !== 0) {
+          errors.push({ id, error: "Product is not free" });
+          continue;
+        }
+
+        // Check if already purchased
+        const { data: existing } = await supabase
+          .from("book_sales")
+          .select("id")
+          .eq("user_id", userId)
+          .eq("book_id", id)
+          .maybeSingle();
+
+        if (existing) {
+          results.push({ id, status: "already_owned" });
+          continue;
+        }
+
+        // Create book_sales record
+        const { error: salesErr } = await supabase
+          .from("book_sales")
+          .insert({
+            user_id: userId,
+            book_id: id,
+            price: 0,
+            purchased_at: new Date().toISOString(),
+          });
+
+        if (salesErr) {
+          console.error("Failed to create book_sales:", salesErr);
+          errors.push({ id, error: "Failed to add to library" });
+          continue;
+        }
+
+        // Add to user_library
+        const { error: libraryErr } = await supabase
+          .from("user_library")
+          .insert({
+            user_id: userId,
+            book_id: id,
+            progress: 0,
+            last_page: 1,
+          });
+
+        // Ignore if already in library (duplicate key error)
+        if (libraryErr && !libraryErr.message?.includes("duplicate")) {
+          console.error("Failed to add to user_library:", libraryErr);
+        }
+
+        results.push({ id, status: "claimed", title: product.title });
+
+      } catch (err) {
+        console.error(`Error claiming item ${item.id}:`, err);
+        errors.push({ id: item.id, error: err.message });
+      }
+    }
+
+    if (errors.length > 0 && results.length === 0) {
+      return res.status(400).json({ error: "Failed to claim products", errors });
+    }
+
+    return res.json({
+      success: true,
+      results,
+      errors: errors.length > 0 ? errors : undefined,
+    });
+
+  } catch (err) {
+    console.error("claimFreeProducts error:", err);
+    return res.status(500).json({ error: "Failed to claim free products" });
   }
 };

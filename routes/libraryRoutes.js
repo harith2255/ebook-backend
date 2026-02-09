@@ -27,6 +27,7 @@ import {
   getCollectionBookIds,
   resetReading,
   removeBookFromAllCollections,
+  claimFreeProducts,
 } from "../controllers/libraryController.js";
 
 const router = express.Router();
@@ -50,6 +51,9 @@ router.put(
   "/reset/:bookId",
   resetReading
 );
+
+// ----- 🆓 Claim Free Products -----
+router.post("/claim-free", claimFreeProducts);
 
 // ----- 📄 Last Page Routes -----
 router.get("/lastpage/:bookId", getLastPage);
