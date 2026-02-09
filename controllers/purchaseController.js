@@ -166,8 +166,12 @@ if (item.type === "writing") {
 
     return res.json({ success: true, results });
   } catch (err) {
-    console.error("unifiedPurchase error:", err);
-    return res.status(500).json({ error: "Server error processing purchase" });
+    console.error("🔥 unifiedPurchase CRITICAL ERROR:", err);
+    console.error("Stack:", err.stack);
+    return res.status(500).json({ 
+      error: "Server error processing purchase",
+      details: err.message 
+    });
   }
 };
 async function processSubscriptionPurchase(userId, planId) {
@@ -240,8 +244,12 @@ async function processBookPurchase(userId, bookId, paymentId = null)
     .eq("id", bookId)
     .single();
 
-  if (priceErr) throw priceErr;
+  if (priceErr) {
+    console.error("❌ processBookPurchase price fetch error:", priceErr);
+    throw priceErr;
+  }
 
+  console.log("💰 Book price found:", bookRow?.price);
  const price = Number(bookRow?.price) || 0;
 
 // 🚫 Paid book without payment → block
@@ -305,6 +313,7 @@ if (price > 0 && !paymentId) {
     console.error("Revenue insert failed (book):", revErr.message);
   }
 
+  console.log("✅ processBookPurchase success for:", bookId);
   return { success: true };
 }
 

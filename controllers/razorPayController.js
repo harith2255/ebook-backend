@@ -148,7 +148,10 @@ export const verifyRazorpayPayment = async (req, res) => {
     }
 
     /* ---------- 4️⃣ Trigger business logic ---------- */
-    req.body = { items };
+    req.body = { 
+      items,
+      payment: { payment_id: razorpay_payment_id }
+    };
     return unifiedPurchase(req, res);
 
   } catch (error) {
