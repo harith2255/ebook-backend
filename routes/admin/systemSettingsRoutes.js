@@ -5,6 +5,7 @@ import {
   getIntegrations,
   updateIntegration,
   createBackup,
+  changeAdminPassword,
 } from "../../controllers/admin/systemSettingsController.js";
 
 import {
@@ -31,5 +32,6 @@ router.put(
 );
 
 router.post("/backup", verifySupabaseAuth.required, adminOnly, createBackup);
+router.put("/password", verifySupabaseAuth.required, adminOnly, changeAdminPassword);
 
 export default router;

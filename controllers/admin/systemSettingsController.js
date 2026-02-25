@@ -86,3 +86,49 @@ export const createBackup = async (req, res) => {
     file_url: fileUrl
   });
 };
+
+/* ✅ CHANGE ADMIN PASSWORD */
+import pool from "../../utils/db.js";
+import bcrypt from "bcrypt";
+
+export const changeAdminPassword = async (req, res) => {
+  try {
+    const adminId = req.user.id;
+    const { current_password, new_password } = req.body;
+
+    if (!current_password || !new_password) {
+      return res.status(400).json({ error: "Current and new password are required" });
+    }
+
+    // 1. Fetch current admin hashed password
+    const { rows } = await pool.query(
+      "SELECT password_hash FROM profiles WHERE id = $1 AND role IN ('Admin', 'Super Admin')",
+      [adminId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "Admin profile not found" });
+    }
+
+    const { password_hash } = rows[0];
+
+    // 2. Verify current password
+    const isValid = await bcrypt.compare(current_password, password_hash);
+    if (!isValid) {
+      return res.status(401).json({ error: "Incorrect current password" });
+    }
+
+    // 3. Hash new password and update
+    const newHash = await bcrypt.hash(new_password, 12);
+
+    await pool.query(
+      "UPDATE profiles SET password_hash = $1 WHERE id = $2",
+      [newHash, adminId]
+    );
+
+    return res.json({ message: "Admin password updated successfully" });
+  } catch (error) {
+    console.error("changeAdminPassword error:", error);
+    return res.status(500).json({ error: "Failed to change admin password" });
+  }
+};
