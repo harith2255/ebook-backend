@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "../utils/supabaseClient.js";
+import pool from "../utils/db.js";
 
 /* ----------------------------------
    GET CURRENT AFFAIRS (USER)
@@ -42,12 +43,22 @@ export const getCurrentAffairs = async (req, res) => {
 
     const safeData = Array.isArray(data) ? data : [];
 
+    // Increment views for each article (once per user, silently)
     await Promise.all(
       safeData.map(article =>
-        supabaseAdmin.rpc("increment_current_affairs_views_once", {
-          p_article_id: article.id,
-          p_user_id: userId,
-        })
+        pool.query(
+          `INSERT INTO current_affairs_views (article_id, user_id)
+           VALUES ($1, $2)
+           ON CONFLICT (article_id, user_id) DO NOTHING`,
+          [article.id, userId]
+        ).then(() =>
+          pool.query(
+            `UPDATE current_affairs SET views = (
+               SELECT COUNT(*) FROM current_affairs_views WHERE article_id = $1
+             ) WHERE id = $1`,
+            [article.id]
+          )
+        ).catch(e => console.warn("View increment skipped:", e.message))
       )
     );
 
@@ -87,15 +98,19 @@ export const incrementViews = async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id; // from auth middleware
 
-    const { error } = await supabaseAdmin.rpc(
-      "increment_current_affairs_views_once",
-      {
-        p_article_id: id,
-        p_user_id: userId,
-      }
+    // Insert view record (once per user) and update count
+    await pool.query(
+      `INSERT INTO current_affairs_views (article_id, user_id)
+       VALUES ($1, $2)
+       ON CONFLICT (article_id, user_id) DO NOTHING`,
+      [id, userId]
     );
-
-    if (error) throw error;
+    await pool.query(
+      `UPDATE current_affairs SET views = (
+         SELECT COUNT(*) FROM current_affairs_views WHERE article_id = $1
+       ) WHERE id = $1`,
+      [id]
+    );
 
     res.json({ success: true });
   } catch (err) {

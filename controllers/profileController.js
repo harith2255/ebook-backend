@@ -3,6 +3,8 @@ import { supabaseAdmin } from "../utils/supabaseClient.js";
 import sharp from "sharp";
 import bcrypt from "bcrypt";
 import pool from "../utils/db.js";
+import fs from "fs";
+import path from "path";
 
 /* ============================================================================
    1. UPLOAD AVATAR
@@ -22,30 +24,26 @@ export const uploadAvatar = async (req, res) => {
       .png()
       .toBuffer();
 
-    const filePath = `avatars/${userId}-${Date.now()}.png`;
+    const filename = `${userId}-${Date.now()}.png`;
+    const uploadDir = path.join(process.cwd(), "uploads", "avatars");
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    const absolutePath = path.join(uploadDir, filename);
 
-    const { error: uploadError } = await supabase.storage
-      .from("avatars")
-      .upload(filePath, optimized, {
-        upsert: true,
-        contentType: "image/png",
-      });
+    await fs.promises.writeFile(absolutePath, optimized);
 
-    if (uploadError) throw uploadError;
+    const publicUrl = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/avatars/${filename}`;
 
-    const { data: urlData } = supabase.storage
-      .from("avatars")
-      .getPublicUrl(filePath);
-
-    // Save avatar to DB
+    // Save avatar URL to DB
     await supabase
       .from("profiles")
-      .update({ avatar_url: urlData.publicUrl })
+      .update({ avatar_url: publicUrl })
       .eq("id", userId);
 
     res.json({
       message: "Avatar updated successfully",
-      avatar_url: urlData.publicUrl,
+      avatar_url: publicUrl,
     });
   } catch (err) {
     console.error("UPLOAD ERROR:", err);

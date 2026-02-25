@@ -622,26 +622,27 @@ export async function uploadMultipleNotes(req, res) {
     const uploaded = [];
 
     for (const file of files) {
-      const filename = `${uuid()}-${file.originalname}`;
-      const path = `study_notes/${filename}`;
+      const filename = `${uuid()}-${file.originalname.replace(/\s+/g, "_")}`;
+      const uploadDir = path.join(process.cwd(), "uploads", "study_notes");
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+      const absolutePath = path.join(uploadDir, filename);
+      await fs.promises.writeFile(absolutePath, file.buffer);
 
-      await supabase.storage
-        .from(NOTES_BUCKET)
-        .upload(path, file.buffer, {
-          contentType: file.mimetype,
-        });
+      const fileUrl = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/study_notes/${filename}`;
 
       const { data, error } = await supabase
         .from("study_notes")
         .insert({
-  subject_id,
-  title: file.originalname,
-  file_name: file.originalname,
-  file_path: path,
-  uploaded_by: req.user?.id ?? null,
-  created_by: req.user?.id ?? null,
-})
-
+          subject_id,
+          title: file.originalname,
+          file_name: file.originalname,
+          file_path: absolutePath,
+          file_url: fileUrl,
+          uploaded_by: req.user?.id ?? null,
+          created_by: req.user?.id ?? null,
+        })
         .select()
         .single();
 
@@ -669,25 +670,26 @@ export async function uploadMultipleExams(req, res) {
     const uploaded = [];
 
     for (const file of files) {
-      const filename = `${uuid()}-${file.originalname}`;
-      const path = `exams/${filename}`;
+      const filename = `${uuid()}-${file.originalname.replace(/\s+/g, "_")}`;
+      const uploadDir = path.join(process.cwd(), "uploads", "exams");
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+      const absolutePath = path.join(uploadDir, filename);
+      await fs.promises.writeFile(absolutePath, file.buffer);
 
-      await supabase.storage
-        .from(EXAMS_BUCKET)
-        .upload(path, file.buffer, {
-          contentType: file.mimetype,
-        });
+      const fileUrl = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/exams/${filename}`;
 
       const { data, error } = await supabase
         .from("exams")
         .insert({
-  subject_id,
-  title: file.originalname,
-  file_name: file.originalname,
-  file_path: path,
-  created_by: req.user?.id ?? null,
-})
-
+          subject_id,
+          title: file.originalname,
+          file_name: file.originalname,
+          file_path: absolutePath,
+          file_url: fileUrl,
+          created_by: req.user?.id ?? null,
+        })
         .select()
         .single();
 
@@ -716,10 +718,14 @@ export async function deleteNote(req, res) {
 
     if (err1 || !note) return res.status(404).json({ error: "Note not found" });
 
-    // remove from storage
-    await supabase.storage
-      .from(NOTES_BUCKET)
-      .remove([note.file_path]);
+    // remove from local storage
+    if (note.file_path && fs.existsSync(note.file_path)) {
+      try {
+        await fs.promises.unlink(note.file_path);
+      } catch (e) {
+        console.warn("Failed to delete note file:", e.message);
+      }
+    }
 
     // delete DB record
     await supabase
@@ -746,11 +752,13 @@ export async function deleteExamFile(req, res) {
 
     if (!exam) return res.status(404).json({ error: "Exam not found" });
 
-    // remove from storage
-    if (exam.file_path) {
-      await supabase.storage
-        .from(EXAMS_BUCKET)
-        .remove([exam.file_path]);
+    // remove from local storage
+    if (exam.file_path && fs.existsSync(exam.file_path)) {
+      try {
+        await fs.promises.unlink(exam.file_path);
+      } catch (e) {
+        console.warn("Failed to delete exam file:", e.message);
+      }
     }
 
     // delete DB record

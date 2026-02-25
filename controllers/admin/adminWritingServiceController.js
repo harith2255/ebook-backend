@@ -1,4 +1,6 @@
 import supabase from "../../utils/supabaseClient.js";
+import fs from "fs";
+import path from "path";
 
 /* ============================================================
    ADMIN: GET ALL PAID WRITING ORDERS
@@ -298,17 +300,16 @@ export const uploadWritingFile = async (req, res) => {
       return res.status(400).json({ error: "File not provided" });
 
     const file = req.file;
-    const fileName = `admin-${Date.now()}-${file.originalname}`;
+    const filename = `admin-${Date.now()}-${file.originalname.replace(/\s+/g, "_")}`;
+    const uploadDir = path.join(process.cwd(), "uploads", "writing_uploads");
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    const absolutePath = path.join(uploadDir, filename);
 
-    const { data, error } = await supabase.storage
-      .from("writing_uploads")
-      .upload(fileName, file.buffer);
+    await fs.promises.writeFile(absolutePath, file.buffer);
 
-    if (error) throw error;
-
-    const { publicUrl } = supabase.storage
-      .from("writing_uploads")
-      .getPublicUrl(fileName).data;
+    const publicUrl = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/writing_uploads/${filename}`;
 
     return res.json({ url: publicUrl });
   } catch (err) {
@@ -335,19 +336,16 @@ export const createInterviewMaterial = async (req, res) => {
       return res.status(400).json({ error: "Only PDF allowed" });
     }
 
-    const fileName = `interview-${Date.now()}-${file.originalname}`;
+    const filename = `interview-${Date.now()}-${file.originalname.replace(/\s+/g, "_")}`;
+    const uploadDir = path.join(process.cwd(), "uploads", "interview_materials");
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    const absolutePath = path.join(uploadDir, filename);
 
-    const { error: uploadError } = await supabase.storage
-      .from("interview_materials")
-      .upload(fileName, file.buffer, {
-        contentType: file.mimetype,
-      });
+    await fs.promises.writeFile(absolutePath, file.buffer);
 
-    if (uploadError) throw uploadError;
-
-    const { publicUrl } = supabase.storage
-      .from("interview_materials")
-      .getPublicUrl(fileName).data;
+    const publicUrl = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/interview_materials/${filename}`;
 
     const { error: insertError } = await supabase
       .from("interview_materials")
