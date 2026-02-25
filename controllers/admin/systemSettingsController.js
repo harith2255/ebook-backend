@@ -102,7 +102,7 @@ export const changeAdminPassword = async (req, res) => {
 
     // 1. Fetch current admin hashed password
     const { rows } = await pool.query(
-      "SELECT password_hash FROM profiles WHERE id = $1 AND role IN ('Admin', 'Super Admin')",
+      "SELECT password_hash FROM profiles WHERE id = $1 AND role IN ('super_admin', 'org_admin')",
       [adminId]
     );
 
