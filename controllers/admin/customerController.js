@@ -77,15 +77,11 @@ export const suspendCustomer = async (req, res) => {
       return res.status(400).json({ error: profileError.message });
     }
 
-    // Block login + revoke sessions
-    const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(id, {
-      ban_until: "9999-12-31T23:59:59Z",
-      revoke_tokens: true,
-    });
-
-    if (authError) {
-      return res.status(400).json({ error: authError.message });
-    }
+    // Deactivate all sessions for this user
+    await supabaseAdmin
+      .from("user_sessions")
+      .update({ active: false })
+      .eq("user_id", id);
 
     res.json({ message: "Customer suspended successfully" });
   } catch (err) {
@@ -113,10 +109,7 @@ export const activateCustomer = async (req, res) => {
       return res.status(400).json({ error: profileError.message });
     }
 
-   await supabaseAdmin.auth.admin.updateUserById(id, {
-  ban_until: "1970-01-01T00:00:00Z", // 👈 unban properly
-  revoke_tokens: true,
-});
+    // No auth-level ban to remove — account_status update above is sufficient
 
 
     res.json({ message: "Customer activated successfully" });
@@ -291,20 +284,8 @@ export const deleteCustomer = async (req, res) => {
     await supabaseAdmin.from("profiles").delete().eq("id", id);
 
     /* -----------------------------------------
-       3. DELETE THE AUTH USER (ignore harmless errors)
+       3. AUTH USER CLEANUP (no Supabase Auth — already deleted via profile)
     ----------------------------------------- */
-    const { error: authErr } = await supabaseAdmin.auth.admin.deleteUser(id);
-
-    if (authErr) {
-      console.warn("Auth delete warning:", authErr.message);
-
-      if (
-        !authErr.message.includes("not found") &&
-        !authErr.message.includes("Database error deleting user")
-      ) {
-        return res.status(400).json({ error: authErr.message });
-      }
-    }
 
     res.json({ message: "User fully deleted" });
 

@@ -1,5 +1,6 @@
 import express from "express";
 import supabase from "../../utils/supabaseClient.js";
+import bcrypt from "bcrypt";
 
 const router = express.Router();
 
@@ -48,16 +49,24 @@ router.post("/seed-dashboard", async (req, res) => {
     ------------------------------------ */
     for (let i = 0; i < 10; i++) {
       const email = `seed_${Date.now()}_${i}@test.com`;
+      const password_hash = await bcrypt.hash("password123", 12);
 
-      const { data: newUser, error } = await supabase.auth.admin.createUser({
-        email,
-        password: "password123",
-        email_confirm: true
-      });
+      const { data: newUser, error } = await supabase
+        .from("profiles")
+        .insert({
+          email,
+          password_hash,
+          full_name: names[i],
+          role: "User",
+          account_status: "active",
+          created_at: new Date(),
+        })
+        .select("id")
+        .single();
 
       if (error) continue;
 
-      const userId = newUser.user.id;
+      const userId = newUser.id;
 
       await supabase.from("profiles").upsert([
         {

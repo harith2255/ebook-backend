@@ -348,18 +348,23 @@ export const listContent = async (req, res) => {
 if (table === "ebooks") {
   const { data, error } = await supabaseAdmin
     .from("ebooks")
-    .select(`
-      *,
-      categories (
-        id,
-        name,
-        slug
-      )
-    `)
+    .select("*")
     .order("created_at", { ascending: false });
 
   if (error) return res.status(400).json({ error: error.message });
-  return res.json({ contents: data });
+
+  const { data: catData } = await supabaseAdmin.from("categories").select("*");
+  const catMap = {};
+  if (catData) catData.forEach(c => catMap[c.id] = c);
+
+  const formatted = (data || []).map(b => {
+    return {
+      ...b,
+      categories: catMap[b.category_id] || null
+    };
+  });
+
+  return res.json({ contents: formatted });
 }
 
 // ✅ NOTES (NO JOIN)

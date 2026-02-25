@@ -1,5 +1,5 @@
 import express from "express";
-import { supabaseAdmin } from "../../utils/supabaseClient.js";
+import supabase from "../../utils/supabaseClient.js";
 
 const router = express.Router();
 
@@ -11,19 +11,23 @@ router.delete("/delete-all-fake-auth-users", async (req, res) => {
       "alan@gmail.com"
     ];
 
-    const { data, error } = await supabaseAdmin.auth.admin.listUsers();
+    // List all profiles from DB
+    const { data: users, error } = await supabase
+      .from("profiles")
+      .select("id, email");
 
     if (error) return res.status(500).json({ error: error.message });
 
-    const users = data.users;
-
     let deleteCount = 0;
 
-    for (const u of users) {
+    for (const u of (users || [])) {
       const safe = u.email && KEEP.includes(u.email);
 
       if (!safe) {
-        const { error: delErr } = await supabaseAdmin.auth.admin.deleteUser(u.id);
+        const { error: delErr } = await supabase
+          .from("profiles")
+          .delete()
+          .eq("id", u.id);
 
         if (!delErr) {
           deleteCount++;

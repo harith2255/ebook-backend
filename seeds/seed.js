@@ -1,12 +1,8 @@
-import { createClient } from "@supabase/supabase-js";
+import supabase from "../utils/supabaseClient.js";
 import dotenv from "dotenv";
 import crypto from "crypto";
+import bcrypt from "bcrypt";
 dotenv.config();
-
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
 
 // -------------------------------------------------------------
 // 1️⃣ SAMPLE USERS
@@ -57,18 +53,28 @@ async function ensureUser(u) {
   }
 
   console.log(`📌 Creating new user: ${u.email}`);
-  const { data, error } = await supabase.auth.admin.createUser({
-    email: u.email,
-    password: u.password,
-    email_confirm: true,
-  });
+  const password_hash = await bcrypt.hash(u.password, 12);
+  const { data, error } = await supabase
+    .from("profiles")
+    .insert({
+      email: u.email,
+      password_hash,
+      first_name: u.first_name,
+      last_name: u.last_name,
+      full_name: `${u.first_name} ${u.last_name}`,
+      role: u.role || "User",
+      account_status: u.status || "active",
+      created_at: new Date(),
+    })
+    .select("id")
+    .single();
 
   if (error) {
     console.error("❌ User create error:", error);
     return null;
   }
 
-  return data.user.id;
+  return data.id;
 }
 
 async function ensureProfile(userId, u) {

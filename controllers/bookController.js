@@ -10,37 +10,34 @@ export const getAllBooks = async (req, res) => {
 
     let query = supabase
       .from("ebooks")
-      .select(`
-        *,
-        categories:category_id (
-          id,
-          name,
-          slug
-        )
-      `)
+      .select("*")
       .order("created_at", { ascending: false });
 
-    // ✅ Category filter (relation-safe)
-    if (category && category !== "All") {
-      query = query.eq("categories.name", category);
-    }
-
-    // ✅ Search
     if (search) {
-      query = query.or(
-        `title.ilike.%${search}%,author.ilike.%${search}%`
-      );
+      query = query.or(`title.ilike.%${search}%,author.ilike.%${search}%`);
     }
 
-    // ✅ Sort
     if (sort === "popular") {
       query = query.order("sales", { ascending: false });
     }
 
-    const { data, error } = await query;
+    const { data: books, error } = await query;
     if (error) throw error;
 
-    res.json({ contents: data });
+    const { data: catData } = await supabase.from("categories").select("id, name, slug");
+    const catMap = {};
+    if (catData) catData.forEach(c => catMap[c.id] = c);
+
+    let formatted = books.map(b => ({
+      ...b,
+      categories: catMap[b.category_id] || null
+    }));
+
+    if (category && category !== "All") {
+      formatted = formatted.filter(b => b.categories?.name === category);
+    }
+
+    res.json({ contents: formatted });
   } catch (err) {
     console.error("getAllBooks error:", err);
     res.status(500).json({ error: err.message });
@@ -55,31 +52,21 @@ export const getAllBooks = async (req, res) => {
 
 export const getBookById = async (req, res) => {
   try {
-    const { id } = req.params; // UUID of ebook
+    const { id } = req.params;
 
     const { data: book, error } = await supabase
       .from("ebooks")
       .select(`
-        id,
-        title,
-        author,
-        description,
-        price,
-        file_url,
-        rating,
-        reviews,
-        sales,
-        categories (
-          id,
-          name,
-          slug
-        )
+        id, title, author, description, price, file_url, rating, reviews, sales, category_id
       `)
       .eq("id", id)
       .maybeSingle();
 
     if (error) throw error;
     if (!book) return res.status(404).json({ error: "Book not found" });
+
+    const { data: catData } = await supabase.from("categories").select("id, name, slug").eq("id", book.category_id).maybeSingle();
+    book.categories = catData || null;
 
     return res.json({ book });
   } catch (err) {
@@ -96,23 +83,25 @@ export const getBookById = async (req, res) => {
 export const searchBooksByName = async (req, res) => {
   try {
     const { name } = req.query;
-    if (!name)
-      return res.status(400).json({ error: "Book name query required" });
+    if (!name) return res.status(400).json({ error: "Book name query required" });
 
-    const { data, error } = await supabase
+    const { data: books, error } = await supabase
       .from("ebooks")
-      .select(`
-        *,
-        categories (
-          id,
-          name,
-          slug
-        )
-      `)
+      .select("*")
       .ilike("title", `%${name}%`);
 
     if (error) throw error;
-    res.json({ contents: data });
+
+    const { data: catData } = await supabase.from("categories").select("id, name, slug");
+    const catMap = {};
+    if (catData) catData.forEach(c => catMap[c.id] = c);
+
+    const formatted = books.map(b => ({
+      ...b,
+      categories: catMap[b.category_id] || null
+    }));
+
+    res.json({ contents: formatted });
   } catch (err) {
     console.error("Error searching books:", err.message);
     res.status(500).json({ error: "Failed to search books" });
@@ -131,21 +120,25 @@ export const getUserLibrary = async (req, res) => {
       .from("user_library")
       .select(`
         *,
-        book:ebooks (
-          *,
-          categories (
-            id,
-            name,
-            slug
-          )
-        )
+        book:ebooks ( * )
       `)
       .eq("user_id", userId)
       .order("added_at", { ascending: false });
 
     if (error) throw error;
 
-    res.json(data);
+    const { data: catData } = await supabase.from("categories").select("id, name, slug");
+    const catMap = {};
+    if (catData) catData.forEach(c => catMap[c.id] = c);
+
+    const formatted = data.map(row => {
+      if (row.book) {
+        row.book.categories = catMap[row.book.category_id] || null;
+      }
+      return row;
+    });
+
+    res.json(formatted);
   } catch (err) {
     console.error("getUserLibrary error:", err);
     res.status(500).json({ error: err.message });

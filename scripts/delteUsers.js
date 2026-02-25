@@ -1,11 +1,5 @@
 import 'dotenv/config';
-import { createClient } from '@supabase/supabase-js';
-
-// --- Admin client (required for deleting users) ---
-const supabaseAdmin = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+import pool from '../utils/db.js';
 
 // ✅ Keep ONLY these emails
 const ALLOWED_EMAILS = [
@@ -19,18 +13,13 @@ const ALLOWED_EMAILS = [
 (async () => {
   console.log("⚠️ Starting FULL AUTH CLEANUP…");
 
-  // 1️⃣ Fetch ALL users from Supabase Auth
-  const { data: userList, error } = await supabaseAdmin.auth.admin.listUsers();
+  // 1️⃣ Fetch ALL users from profiles table
+  const { rows: users } = await pool.query(`SELECT id, email FROM "profiles"`);
 
-  if (error) {
-    console.error("❌ Error fetching users:", error);
-    return;
-  }
-
-  console.log(`📌 Total Auth Users Found: ${userList.users.length}`);
+  console.log(`📌 Total Users Found: ${users.length}`);
 
   // 2️⃣ Filter users NOT in ALLOWED_EMAILS
-  const usersToDelete = userList.users.filter(
+  const usersToDelete = users.filter(
     (u) => !ALLOWED_EMAILS.includes(u.email?.toLowerCase())
   );
 
@@ -40,14 +29,14 @@ const ALLOWED_EMAILS = [
   for (const user of usersToDelete) {
     console.log(`Deleting: ${user.email} (${user.id})`);
 
-    const { error: delErr } = await supabaseAdmin.auth.admin.deleteUser(user.id);
-
-    if (delErr) {
-      console.error(`❌ Error deleting ${user.email}:`, delErr.message);
-    } else {
+    try {
+      await pool.query(`DELETE FROM "profiles" WHERE id = $1`, [user.id]);
       console.log(`✔ Deleted: ${user.email}`);
+    } catch (err) {
+      console.error(`❌ Error deleting ${user.email}:`, err.message);
     }
   }
 
   console.log("🎉 AUTH CLEANUP FINISHED!");
+  process.exit(0);
 })();

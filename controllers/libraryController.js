@@ -1,4 +1,5 @@
 import supabase from "../utils/supabaseClient.js";
+import pool from "../utils/db.js";
 
 /* ============================================
    📘 GET ALL BOOKS IN USER LIBRARY
@@ -11,75 +12,50 @@ export const getUserLibrary = async (req, res) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    // STEP 1: Purchased books + ebook data
-    const { data: purchases, error } = await supabase
-      .from("book_sales")
-      .select(`
-        id,
-        book_id,
-        purchased_at,
-        ebooks!fk_book_sales_book (
-  id,
-  title,
-  author,
-  cover_url,
-  pages,
-  categories (
-    id,
-    name
-  )
-)
-
-      `)
-      .eq("user_id", userId)
-      .order("purchased_at", { ascending: false });
-
-    if (error) throw error;
+    // Use raw SQL to handle the nested joins securely and correctly
+    const { rows: purchases } = await pool.query(`
+      SELECT 
+        bs.id,
+        bs.book_id,
+        bs.purchased_at,
+        e.title,
+        e.author,
+        e.cover_url,
+        e.pages,
+        c.name as category_name,
+        ul.progress,
+        ul.last_page
+      FROM book_sales bs
+      JOIN ebooks e ON bs.book_id = e.id
+      LEFT JOIN categories c ON e.category_id = c.id
+      LEFT JOIN user_library ul ON ul.book_id = bs.book_id AND ul.user_id = bs.user_id
+      WHERE bs.user_id = $1
+      ORDER BY bs.purchased_at DESC
+    `, [userId]);
 
     if (!purchases || purchases.length === 0) {
       return res.json([]);
     }
 
-    // STEP 2: Progress
-    const bookIds = purchases.map(p => p.book_id);
-
-    const { data: libraryRows } = await supabase
-      .from("user_library")
-      .select("book_id, progress, last_page")
-      .in("book_id", bookIds)
-      .eq("user_id", userId);
-
-    const libraryMap = new Map();
-    (libraryRows || []).forEach(r => libraryMap.set(r.book_id, r));
-
-    // STEP 3: Final normalized response
-    const formatted = purchases.map(row => {
-      const ebook = row.ebooks || {};
-      const lib = libraryMap.get(row.book_id) || {};
-
-      return {
-        book_id: row.book_id,
-
-       ebooks: {
-  id: ebook.id,
-  title: ebook.title,
-  author: ebook.author,
-  category: ebook.categories?.name ?? null,
-  cover_url: ebook.cover_url || "https://placehold.co/300x400",
-  pages: ebook.pages || 0,
-},
-
-
-        progress: Number(lib.progress ?? 0),
-        added_at: row.purchased_at || null,
-      };
-    });
+    const formatted = purchases.map(row => ({
+      book_id: row.book_id,
+      ebooks: {
+        id: row.book_id,
+        title: row.title,
+        author: row.author,
+        category: row.category_name || null,
+        cover_url: row.cover_url || "https://placehold.co/300x400",
+        pages: row.pages || 0,
+      },
+      progress: Number(row.progress || 0),
+      added_at: row.purchased_at || null,
+    }));
 
     return res.json(formatted);
 
   } catch (err) {
     console.error("getUserLibrary error:", err);
-    return res.status(500).json({ error: "Failed to load library" });
+    return res.status(500).json({ error: "Failed to load library", msg: err.message || JSON.stringify(err) });
   }
 };
 
@@ -151,28 +127,28 @@ export const getRecentBooks = async (req, res) => {
       progress,
       added_at,
       ebooks!fk_user_library_ebooks (
-  id,
-  title,
-  author,
-  description,
-  cover_url,
-  file_url,
-  pages,
-  price,
-  sales,
-  categories (
-    id,
-    name
-  )
-)
-
+        id, title, author, description, cover_url, file_url, pages, price, sales, category_id
+      )
     `)
     .eq("user_id", userId)
     .order("added_at", { ascending: false })
     .limit(5);
 
   if (error) return res.status(400).json({ error: error.message });
-  res.json(data);
+  
+  // Fetch categories to map the name manually
+  const { data: catData } = await supabase.from("categories").select("id, name");
+  const catMap = {};
+  if (catData) catData.forEach(c => catMap[c.id] = c.name);
+
+  const formatted = (data || []).map(row => {
+    if (row.ebooks) {
+      row.ebooks.categories = { name: catMap[row.ebooks.category_id] || null };
+    }
+    return row;
+  });
+
+  res.json(formatted);
 };
 
 /* ============================================
@@ -188,33 +164,29 @@ export const getCurrentlyReading = async (req, res) => {
       progress,
       added_at,
       ebooks!fk_user_library_ebooks (
-  id,
-  title,
-  author,
-  description,
-  cover_url,
-  file_url,
-  pages,
-  price,
-  sales,
-  categories (
-    id,
-    name
-  )
-)
-
+        id, title, author, description, cover_url, file_url, pages, price, sales, category_id
+      )
     `)
     .eq("user_id", userId)
     .gt("progress", 0)
     .lt("progress", 100);
 
   if (error) return res.status(400).json({ error: error.message });
-  res.json(data);
+
+  const { data: catData } = await supabase.from("categories").select("id, name");
+  const catMap = {};
+  if (catData) catData.forEach(c => catMap[c.id] = c.name);
+
+  const formatted = (data || []).map(row => {
+    if (row.ebooks) {
+      row.ebooks.categories = { name: catMap[row.ebooks.category_id] || null };
+    }
+    return row;
+  });
+
+  res.json(formatted);
 };
 
-/* ============================================
-   ✅ COMPLETED BOOKS
-============================================ */
 export const getCompletedBooks = async (req, res) => {
   const userId = req.user.id;
 
@@ -224,33 +196,29 @@ export const getCompletedBooks = async (req, res) => {
       id,
       progress,
       added_at,
-     ebooks!fk_user_library_ebooks (
-  id,
-  title,
-  author,
-  description,
-  cover_url,
-  file_url,
-  pages,
-  price,
-  sales,
-  categories (
-    id,
-    name
-  )
-)
-
+      ebooks!fk_user_library_ebooks (
+        id, title, author, description, cover_url, file_url, pages, price, sales, category_id
+      )
     `)
     .eq("user_id", userId)
     .eq("progress", 100);
 
   if (error) return res.status(400).json({ error: error.message });
-  res.json(data);
+
+  const { data: catData } = await supabase.from("categories").select("id, name");
+  const catMap = {};
+  if (catData) catData.forEach(c => catMap[c.id] = c.name);
+
+  const formatted = (data || []).map(row => {
+    if (row.ebooks) {
+      row.ebooks.categories = { name: catMap[row.ebooks.category_id] || null };
+    }
+    return row;
+  });
+
+  res.json(formatted);
 };
 
-/* ============================================
-   🔍 SEARCH LIBRARY
-============================================ */
 export const searchLibrary = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -262,22 +230,9 @@ export const searchLibrary = async (req, res) => {
         id,
         progress,
         added_at,
-       ebooks!fk_user_library_ebooks (
-  id,
-  title,
-  author,
-  description,
-  cover_url,
-  file_url,
-  pages,
-  price,
-  sales,
-  categories (
-    id,
-    name
-  )
-)
-
+        ebooks!fk_user_library_ebooks (
+          id, title, author, description, cover_url, file_url, pages, price, sales, category_id
+        )
       `)
       .eq("user_id", userId);
 
@@ -287,7 +242,18 @@ export const searchLibrary = async (req, res) => {
       entry.ebooks?.title?.toLowerCase().includes(query.toLowerCase())
     );
 
-    res.json(filtered);
+    const { data: catData } = await supabase.from("categories").select("id, name");
+    const catMap = {};
+    if (catData) catData.forEach(c => catMap[c.id] = c.name);
+
+    const formatted = filtered.map(row => {
+      if (row.ebooks) {
+        row.ebooks.categories = { name: catMap[row.ebooks.category_id] || null };
+      }
+      return row;
+    });
+
+    res.json(formatted);
   } catch (err) {
     console.error("Search error:", err.message);
     res.status(500).json({ error: "Failed to search library" });
@@ -346,23 +312,22 @@ export const getCollectionBooks = async (req, res) => {
   author,
   cover_url,
   pages,
-  categories (
-    id,
-    name
-  )
+  category_id
 `)
-
       .in("id", ids);
 
     if (booksErr) throw booksErr;
+
+    const { data: catData } = await supabase.from("categories").select("id, name");
+    const catMap = {};
+    if (catData) catData.forEach(c => catMap[c.id] = c.name);
 
     // 4) Format + fallback cover
     const formatted = books.map(b => ({
       id: b.id,
       title: b.title,
       author: b.author,
-      category: b.categories?.name ?? null,
-
+      category: catMap[b.category_id] || null,
       cover_url: b.cover_url || "https://placehold.co/300x400",
       pages: b.pages
     }));

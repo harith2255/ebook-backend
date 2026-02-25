@@ -5,28 +5,19 @@ import { supabaseAdmin } from "../../utils/supabaseClient.js";
    1️⃣ FETCH ALL USERS (with pagination)
 ------------------------------------------------------- */
 async function fetchAllUsers() {
-  let page = 1;
-  const perPage = 100;
-  let all = [];
+  // This function is not currently called anywhere in the active code paths.
+  // The getRecipients function below uses v_customers view directly.
+  // Kept for backwards compatibility.
+  const { data, error } = await supabaseAdmin
+    .from("profiles")
+    .select("id, email, role, full_name, first_name, last_name, created_at");
 
-  while (true) {
-    const { data, error } = await supabaseAdmin.auth.admin.listUsers({
-      page,
-      perPage,
-    });
-
-    if (error) {
-      console.error("❌ listUsers pagination error:", error);
-      break;
-    }
-
-    all = [...all, ...data.users];
-
-    if (data.users.length < perPage) break;
-    page++;
+  if (error) {
+    console.error("❌ fetchAllUsers error:", error);
+    return [];
   }
 
-  return all;
+  return data || [];
 }
 
 /* -------------------------------------------------------

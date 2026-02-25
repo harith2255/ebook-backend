@@ -1,8 +1,9 @@
-import { supabasePublic, supabaseAdmin } from "../utils/supabaseClient.js";
+import jwt from "jsonwebtoken";
+import pool from "../utils/db.js";
 import dotenv from "dotenv";
 dotenv.config();
-const SESSION_TTL_DAYS = 15;
-const SESSION_TTL_MS = 60* 1000; // 1 minute
+
+const JWT_SECRET = process.env.JWT_SECRET || "change-me-in-production";
 
 // middleware/authMiddleware.js
 
@@ -17,15 +18,43 @@ export const verifySupabaseAuth = {
 
       const token = authHeader.split(" ")[1];
 
-      // ⭐ Correct usage for Supabase v2
-      const { data, error } = await supabasePublic.auth.getUser(token);
-
-      if (error || !data?.user) {
-        console.log("auth error:", error);
+      // Verify JWT
+      let decoded;
+      try {
+        decoded = jwt.verify(token, JWT_SECRET);
+      } catch (jwtErr) {
+        console.log("auth error:", jwtErr.message);
         return res.status(401).json({ error: "jwt_invalid" });
       }
 
-      req.user = data.user;
+      // Fetch full user profile from DB
+      const { rows } = await pool.query(
+        `SELECT id, email, role, full_name, first_name, last_name, account_status
+         FROM profiles WHERE id = $1`,
+        [decoded.id]
+      );
+
+      if (rows.length === 0) {
+        return res.status(401).json({ error: "jwt_invalid" });
+      }
+
+      const user = rows[0];
+
+      // Attach user to request (matching Supabase user shape for compatibility)
+      req.user = {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        full_name: user.full_name,
+        app_metadata: { role: user.role },
+        user_metadata: {
+          role: user.role,
+          full_name: user.full_name,
+          first_name: user.first_name,
+          last_name: user.last_name,
+        },
+      };
+
       next();
     } catch (err) {
       console.error("Auth crash:", err);
@@ -33,9 +62,6 @@ export const verifySupabaseAuth = {
     }
   },
 };
-
-
-
 
 
 export function adminOnly(req, res, next) {

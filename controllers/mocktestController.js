@@ -1,29 +1,26 @@
 import supabase from "../utils/supabaseClient.js";
+import pool from "../utils/db.js";
 
 /* ======================================================
    GET AVAILABLE + UPCOMING TESTS
 ====================================================== */
 export const getAvailableTests = async (req, res) => {
   try {
-    const { data, error } = await supabase
-      .from("mock_tests")
-      .select(`
-        id,
-        title,
-        subject,
-        difficulty,
-        duration_minutes,
-        total_questions,
-        start_time,
-        mock_attempts(user_id)
-      `)
-      .order("start_time", { ascending: true });
+    const { rows: data } = await pool.query(`
+      SELECT 
+        m.id, m.title, m.subject, m.difficulty, 
+        m.duration_minutes, m.total_questions, m.start_time,
+        COALESCE(
+          json_agg(json_build_object('user_id', a.user_id)) 
+          FILTER (WHERE a.id IS NOT NULL), '[]'
+        ) as mock_attempts
+      FROM mock_tests m
+      LEFT JOIN mock_attempts a ON m.id = a.test_id
+      GROUP BY m.id
+      ORDER BY m.start_time ASC
+    `);
 
-    if (error) {
-      return res.status(400).json({ error: error.message });
-    }
-
-    const result = (data || []).map(t => ({
+    const result = data.map(t => ({
       id: t.id,
       title: t.title,
       subject: t.subject,
@@ -39,7 +36,7 @@ export const getAvailableTests = async (req, res) => {
     return res.json(result);
   } catch (err) {
     console.error("getAvailableTests error:", err);
-    return res.status(500).json({ error: "Failed to fetch tests" });
+    return res.status(500).json({ error: "Failed to fetch tests", msg: err.message || JSON.stringify(err) });
   }
 };
 

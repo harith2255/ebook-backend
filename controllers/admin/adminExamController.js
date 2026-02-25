@@ -335,11 +335,13 @@ export async function getExamSubmissions(req, res) {
     const enriched = await Promise.all(
       submissions.map(async (s) => {
         // fetch email
-        const { data: userData } = await supabase.auth.admin.getUserById(
-          s.user_id
-        );
+        const { data: profileData } = await supabase
+          .from("profiles")
+          .select("email")
+          .eq("id", s.user_id)
+          .maybeSingle();
 
-        const email = userData?.user?.email ?? null;
+        const email = profileData?.email ?? null;
 
         // signed URL if file exists
         let url = null;

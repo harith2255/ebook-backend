@@ -1,6 +1,8 @@
 import supabase from "../utils/supabaseClient.js";
 import { supabaseAdmin } from "../utils/supabaseClient.js";
 import sharp from "sharp";
+import bcrypt from "bcrypt";
+import pool from "../utils/db.js";
 
 /* ============================================================================
    1. UPLOAD AVATAR
@@ -167,13 +169,14 @@ export const changePassword = async (req, res) => {
       return res.status(400).json({ error: "New password required" });
     }
 
-    // Use ADMIN API to update password without needing Supabase session
-    const { data, error } = await supabase.auth.admin.updateUserById(userId, {
-      password: new_password,
-    });
+    // Hash and update password directly in DB
+    const password_hash = await bcrypt.hash(new_password, 12);
+    const { error } = await supabaseAdmin
+      .from("profiles")
+      .update({ password_hash })
+      .eq("id", userId);
 
     if (error) {
-      console.error("Admin Password Update Error:", error);
       return res.status(400).json({ error: error.message });
     }
 

@@ -1,35 +1,14 @@
 // utils/supabaseClient.js
-import { createClient } from "@supabase/supabase-js";
-import dotenv from "dotenv";
+// ─── MIGRATED: now re-exports from pgClient.js (Railway PostgreSQL) ───
+// Supabase Storage is still connected for file operations.
+// Database queries and Auth use the custom pgClient wrapper over Railway PostgreSQL.
 
-dotenv.config();
+import pgClient, { supabaseAdmin, supabasePublic, initPgClient } from "./pgClient.js";
 
-// 🟢 Public client (for verifying tokens)
-export const supabasePublic = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-      detectSessionInUrl: false,
-    },
-  }
+// Initialize Supabase storage (async, non-blocking)
+initPgClient(pgClient).catch((err) =>
+  console.warn("Storage init warning:", err.message)
 );
 
-// 🔴 Admin client (for database operations)
-export const supabaseAdmin = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-      detectSessionInUrl: false,
-    },
-  }
-);
-
-// 🧩 Default export (backward compatibility)
-const supabase = supabaseAdmin; // old code keeps working
-export default supabase;
+export { supabaseAdmin, supabasePublic };
+export default pgClient;

@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import bodyParser from "body-parser";
 import cron from "node-cron";
 import supabase from "./utils/supabaseClient.js";
+import pool from "./utils/db.js";
 
 import compression from "compression";
 
@@ -42,20 +43,20 @@ cron.schedule("*/5 * * * *", async () => {
   console.log("⏰ [CRON] Checking for expired mock tests...");
 
   try {
-    const { data: attempts, error } = await supabase
-      .from("mock_attempts")
-      .select("id, started_at, test_id, mock_tests(duration_minutes)")
-      .eq("status", "in_progress");
-
-    if (error) throw error;
-    if (!attempts?.length) return;
+    // Raw SQL join (pgClient wrapper doesn't support FK join syntax)
+    const { rows: attempts } = await pool.query(`
+      SELECT a.id, a.started_at, t.duration_minutes
+      FROM mock_attempts a
+      LEFT JOIN mock_tests t ON a.test_id = t.id
+      WHERE a.status = 'in_progress'
+    `);
 
     const now = new Date();
     const expiredIds = [];
 
     for (const attempt of attempts) {
       const started = new Date(attempt.started_at);
-      const duration = attempt.mock_tests?.duration_minutes || 0;
+      const duration = attempt.duration_minutes || 0;
       const expiresAt = new Date(started.getTime() + duration * 60000);
 
       if (now > expiresAt) expiredIds.push(attempt.id);
@@ -99,7 +100,7 @@ import customerRoutes from "./routes/admin/customerRoutes.js";
 import contentRoutes from "./routes/admin/contentRoutes.js"; // ⭐ UPLOAD CONTENT
 import drmRoutes from "./routes/admin/drmRoutes.js";
 import reportsRoutes from "./routes/admin/reportRoutes.js";
-import aiRoutes from "./routes/admin/aiRoutes.js";
+// import aiRoutes from "./routes/admin/aiRoutes.js";
 import notificationRoutes from "./routes/admin/notificationRoutes.js";
 import seedRoutes from "./routes/admin/seedRoutes.js";
 import adminJobRoutes from "./routes/admin/jobRoutes.js";
@@ -143,7 +144,7 @@ app.use("/api/admin/customers", customerRoutes);
 app.use("/api/admin/content", contentRoutes); // upload list delete edit
 app.use("/api/admin/drm", drmRoutes);
 app.use("/api/admin/reports", reportsRoutes);
-app.use("/api/admin/ai", aiRoutes);
+// 
 app.use("/api/admin/notifications", notificationRoutes);
 app.use("/api/admin/seed", seedRoutes);
 app.use("/api/admin/jobs", adminJobRoutes);
