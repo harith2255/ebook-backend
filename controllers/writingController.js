@@ -1,6 +1,8 @@
 // controllers/writingServiceController.js
 import supabase from "../utils/supabaseClient.js";
 import multer from "multer";
+import fs from "fs";
+import path from "path";
 
 
 /* =====================================================
@@ -241,28 +243,19 @@ export const uploadUserAttachment = (req, res) => {
       const safeName = file.originalname.replace(/\s+/g, "_");
       const fileName = `user-${req.user.id}-${Date.now()}-${safeName}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from("writing_uploads")
-        .upload(fileName, file.buffer, {
-          contentType: file.mimetype,
-          upsert: false,
-        });
-
-      if (uploadError) {
-        console.error("Supabase upload error:", uploadError);
-        return res.status(500).json({
-          error: "Supabase upload failed",
-          details: uploadError.message,
-        });
+      const uploadDir = path.join(process.cwd(), "uploads", "writing_uploads");
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
       }
 
-      const { data: publicUrl } = supabase.storage
-        .from("writing_uploads")
-        .getPublicUrl(fileName);
+      const absolutePath = path.join(uploadDir, fileName);
+      await fs.promises.writeFile(absolutePath, file.buffer);
+
+      const publicUrl = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/writing_uploads/${fileName}`;
 
       return res.json({
         message: "File uploaded successfully",
-        url: publicUrl.publicUrl,
+        url: publicUrl,
       });
     } catch (error) {
       console.error("uploadUserAttachment error:", error);
@@ -439,20 +432,16 @@ export const streamInterviewMaterialPdf = async (req, res) => {
     }
 
     // file_url is like: admin-1767083451486-E-Book Report.pdf
-    const objectPath = data.file_url;
+    // file_url might already be a fully qualified URL starting with http if it's new
+    let finalUrl = objectPath;
 
-    // 2️⃣ generate public URL from the bucket
-    const { data: publicFile } = await supabaseAdmin.storage
-      .from("interview_materials")
-      .getPublicUrl(objectPath);
-
-    if (!publicFile?.publicUrl) {
-      return res.status(500).json({ error: "Failed to generate file URL" });
+    if (!objectPath.startsWith("http")) {
+       finalUrl = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/interview_materials/${objectPath}`;
     }
 
     // 3️⃣ return usable URL
     return res.json({
-      url: publicFile.publicUrl,  // <-- FIXED usable URL
+      url: finalUrl,  // <-- FIXED usable URL
       type: "public",
     });
 
@@ -505,13 +494,16 @@ export const downloadOrderFile = async (req, res) => {
     console.log("🗝 Object Key =", key);
 
     // ---------------------------
-    // Get public URL again (works even if already public)
+    // Return the URL directly since it's now statically hosted
     // ---------------------------
-    const { data: publicData } = supabaseAdmin.storage
-      .from("writing_uploads")
-      .getPublicUrl(key);
+    let finalUrl = fullUrl;
+    
+    // If it's a legacy URL that was parsed
+    if (!fullUrl.startsWith('http')) {
+        finalUrl = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/writing_uploads/${key}`;
+    }
 
-    return res.json({ url: publicData.publicUrl });
+    return res.json({ url: finalUrl });
 
   } catch (err) {
     console.error(err);

@@ -1,6 +1,8 @@
 import { supabaseAdmin } from "../../utils/supabaseClient.js";
 
 import getPdfPageCount from "../../utils/pdfReader.js";
+import fs from "fs";
+import path from "path";
 
 /* ============================================================================
    UPLOAD CONTENT
@@ -115,25 +117,17 @@ if (rawCategory) {
 
     /* ==================== FILE UPLOAD ==================== */
     if (file) {
-      const filePath = `${Date.now()}-${file.originalname}`;
-
-      const { error: uploadErr } = await supabaseAdmin.storage
-        .from(table)
-        .upload(filePath, file.buffer, {
-          contentType: file.mimetype,
-          upsert: false,
-        });
-
-      if (uploadErr) {
-        console.error("File upload error:", uploadErr);
-        return res.status(400).json({ error: uploadErr.message });
+      const fileName = `${Date.now()}-${file.originalname.replace(/\s+/g, "_")}`;
+      const uploadDir = path.join(process.cwd(), "uploads", table);
+      
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
       }
 
-      const { data: publicData } = supabaseAdmin.storage
-        .from(table)
-        .getPublicUrl(filePath);
+      const filePath = path.join(uploadDir, fileName);
+      await fs.promises.writeFile(filePath, file.buffer);
 
-      publicUrl = publicData?.publicUrl || null;
+      publicUrl = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/${table}/${fileName}`;
 
       if (file.mimetype === "application/pdf") {
         try {
@@ -146,25 +140,17 @@ if (rawCategory) {
 
     /* ==================== COVER UPLOAD ==================== */
     if (cover) {
-      const coverPath = `${Date.now()}-${cover.originalname}`;
+      const coverName = `${Date.now()}-${cover.originalname.replace(/\s+/g, "_")}`;
+      const coverDir = path.join(process.cwd(), "uploads", "covers");
 
-      const { error: coverErr } = await supabaseAdmin.storage
-        .from("covers")
-        .upload(coverPath, cover.buffer, {
-          contentType: cover.mimetype,
-          upsert: false,
-        });
-
-      if (coverErr) {
-        console.error("Cover upload error:", coverErr);
-        return res.status(400).json({ error: coverErr.message });
+      if (!fs.existsSync(coverDir)) {
+        fs.mkdirSync(coverDir, { recursive: true });
       }
 
-      const { data: coverData } = supabaseAdmin.storage
-        .from("covers")
-        .getPublicUrl(coverPath);
+      const coverPath = path.join(coverDir, coverName);
+      await fs.promises.writeFile(coverPath, cover.buffer);
 
-      coverUrl = coverData?.publicUrl || null;
+      coverUrl = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/covers/${coverName}`;
     }
 
     /* ==================== BUILD INSERT OBJ ==================== */
@@ -544,17 +530,17 @@ if (req.body.category && table !== "mock_tests") {
     const cover = req.files?.cover?.[0];
 
     if (file) {
-      const filePath = `${Date.now()}-${file.originalname}`;
+      const fileName = `${Date.now()}-${file.originalname.replace(/\s+/g, "_")}`;
+      const uploadDir = path.join(process.cwd(), "uploads", table);
 
-      await supabaseAdmin.storage.from(table).upload(filePath, file.buffer, {
-        contentType: file.mimetype,
-      });
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
 
-      const { data } = supabaseAdmin.storage
-        .from(table)
-        .getPublicUrl(filePath);
+      const filePath = path.join(uploadDir, fileName);
+      await fs.promises.writeFile(filePath, file.buffer);
 
-      updates.file_url = data?.publicUrl;
+      updates.file_url = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/${table}/${fileName}`;
 
       if (file.mimetype === "application/pdf") {
         updates.pages = getPdfPageCount(file.buffer);
@@ -562,19 +548,17 @@ if (req.body.category && table !== "mock_tests") {
     }
 
     if (cover) {
-      const coverPath = `${Date.now()}-${cover.originalname}`;
+      const coverName = `${Date.now()}-${cover.originalname.replace(/\s+/g, "_")}`;
+      const coverDir = path.join(process.cwd(), "uploads", "covers");
 
-      await supabaseAdmin.storage
-        .from("covers")
-        .upload(coverPath, cover.buffer, {
-          contentType: cover.mimetype,
-        });
+      if (!fs.existsSync(coverDir)) {
+        fs.mkdirSync(coverDir, { recursive: true });
+      }
 
-      const { data } = supabaseAdmin.storage
-        .from("covers")
-        .getPublicUrl(coverPath);
+      const coverPath = path.join(coverDir, coverName);
+      await fs.promises.writeFile(coverPath, cover.buffer);
 
-      updates.cover_url = data?.publicUrl;
+      updates.cover_url = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/covers/${coverName}`;
     }
 
     /* ================= NOTHING TO UPDATE ================= */

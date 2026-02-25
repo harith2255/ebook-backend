@@ -1,5 +1,7 @@
 // controllers/admin/reportsController.js
 import { supabaseAdmin } from "../../utils/supabaseClient.js";
+import fs from "fs";
+import path from "path";
 
 /* -------------------------------------------------------
    Helper: Month Names
@@ -190,36 +192,23 @@ export const generateReport = async (req, res) => {
     const csv = csvHeader + csvRows.join("\n");
 
     /* -------------------------------------------------------
-       Upload CSV to Supabase Storage  (Buffer!)
+       Upload CSV to Local Storage  (Buffer!)
     ------------------------------------------------------- */
     const fileName = `analytics-${Date.now()}.csv`;
-
     const buffer = Buffer.from(csv, "utf-8");
-
-    const { error: uploadErr } = await supabaseAdmin.storage
-      .from("reports")
-      .upload(fileName, buffer, {
-        contentType: "text/csv",
-        cacheControl: "3600",
-        upsert: true,
-      });
-
-    if (uploadErr) {
-      console.error("📦 Storage upload error:", uploadErr);
-      return res.status(400).json({ error: uploadErr.message });
+    
+    const reportsDir = path.join(process.cwd(), "uploads", "reports");
+    if (!fs.existsSync(reportsDir)) {
+      fs.mkdirSync(reportsDir, { recursive: true });
     }
+    
+    const filePath = path.join(reportsDir, fileName);
+    await fs.promises.writeFile(filePath, buffer);
 
     /* -------------------------------------------------------
        Get public URL
     ------------------------------------------------------- */
-    const urlObj = supabaseAdmin.storage
-      .from("reports")
-      .getPublicUrl(fileName);
-
-    const publicURL = urlObj?.data?.publicUrl;
-
-    if (!publicURL)
-      return res.status(500).json({ error: "Failed to generate public URL" });
+    const publicURL = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/reports/${fileName}`;
 
     /* -------------------------------------------------------
        Save metadata in "reports" table
@@ -266,10 +255,19 @@ export const downloadReport = async (req, res) => {
       return res.status(404).json({ error: "Report not found" });
     }
 
-    const response = await fetch(data.file_url);
-    const buffer = await response.arrayBuffer();
-    res.setHeader("Content-Type", "text/csv");
-    res.send(Buffer.from(buffer));
+    // data.file_url is like http://localhost:5000/uploads/reports/analytics-123.csv
+    const fileName = data.file_url.split("/").pop();
+    const filePath = path.join(process.cwd(), "uploads", "reports", fileName);
+
+    if (!fs.existsSync(filePath)) {
+       return res.status(404).json({ error: "Report file missing on server" });
+    }
+
+    res.download(filePath, fileName, (err) => {
+      if (err) {
+        console.error("Download error:", err);
+      }
+    });
   } catch (err) {
     console.error("🔥 downloadReport error:", err);
     res.status(500).json({ error: "Failed to download report" });

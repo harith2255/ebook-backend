@@ -109,32 +109,53 @@ const weeklyHours = Math.round(weeklyHoursRaw * 10) / 10;
 
 
     // --------------------
-// 5) Active Streak (dynamic)
-// --------------------
-const { data: activityDates, error: activityErr } = await supabase
-  .rpc("get_user_activity_dates", { uid: userId });
+    // 5) Active Streak (dynamic from study_sessions)
+    // --------------------
+    const { data: userSessions, error: activityErr } = await supabase
+      .from("study_sessions")
+      .select("created_at")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false });
 
-if (activityErr) throw activityErr;
+    if (activityErr) throw activityErr;
 
-// activityDates = ["2024-09-10", "2024-09-09", "2024-09-08"]
+    // Extract unique dates as YYYY-MM-DD strings
+    const activityDates = [...new Set(
+      (userSessions || []).map(s => new Date(s.created_at).toISOString().split('T')[0])
+    )];
 
-let streak = 0;
-let cursor = new Date();
-cursor.setHours(0, 0, 0, 0);
+    let streak = 0;
+    
+    // We check backwards from today
+    let checkDate = new Date();
+    
+    // First, check if the user was active today. If not, check yesterday.
+    // If not active yesterday, streak is automatically 0.
+    const todayStr = checkDate.toISOString().split('T')[0];
+    
+    checkDate.setDate(checkDate.getDate() - 1);
+    const yesterdayStr = checkDate.toISOString().split('T')[0];
 
-for (const d of activityDates) {
-  const day = new Date(d);
-  day.setHours(0, 0, 0, 0);
+    // Build normalized array
+    let streakDate = new Date();
+    
+    if (activityDates.includes(todayStr)) {
+       // active today, streak continues
+    } else if (activityDates.includes(yesterdayStr)) {
+       // active yesterday but not today, streak continues but start checking from yesterday
+       streakDate.setDate(streakDate.getDate() - 1);
+    } else {
+       // inactive for >2 days, streak is 0
+       activityDates.length = 0; 
+    }
 
-  if (cursor.getTime() === day.getTime()) {
-    streak++;
-    cursor.setDate(cursor.getDate() - 1);
-  } else {
-    break;
-  }
-}
+    // Count backwards from streakDate
+    while (activityDates.includes(streakDate.toISOString().split('T')[0])) {
+      streak++;
+      streakDate.setDate(streakDate.getDate() - 1);
+    }
 
-const activeStreak = streak;
+    const activeStreak = streak;
 
 
     // --------------------

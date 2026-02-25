@@ -1,5 +1,7 @@
 import { supabaseAdmin } from "../../utils/supabaseClient.js";
 import { randomUUID } from "crypto";
+import fs from "fs";
+import path from "path";
 
 /* -------------------------
    GET ALL ARTICLES
@@ -44,23 +46,22 @@ export const createArticle = async (req, res) => {
 
     if (req.file) {
       const fileExt = req.file.originalname.split(".").pop();
-      const path = `current-affairs/${new Date().getFullYear()}/${randomUUID()}.${fileExt}`;
+      const fileName = `${randomUUID()}.${fileExt}`;
+      const yearStr = new Date().getFullYear().toString();
+      
+      const uploadDir = path.join(process.cwd(), "uploads", "current_affairs", yearStr);
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
 
-      const upload = await supabaseAdmin.storage
-        .from("current-affairs")
-        .upload(path, req.file.buffer, {
-          contentType: req.file.mimetype,
-          upsert: false,
-        });
+      const absolutePath = path.join(uploadDir, fileName);
+      await fs.promises.writeFile(absolutePath, req.file.buffer);
 
-      if (upload.error) throw upload.error;
+      // We still store a relative-looking path to help with deletion later
+      const relativePath = `current_affairs/${yearStr}/${fileName}`;
 
-      const { data } = supabaseAdmin.storage
-        .from("current-affairs")
-        .getPublicUrl(path);
-
-      imageUrl = data.publicUrl;
-      imagePath = path;
+      imageUrl = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/${relativePath}`;
+      imagePath = absolutePath;
     }
 const normalizedCategory = category.trim().toLowerCase();
 
@@ -129,9 +130,13 @@ export const deleteArticle = async (req, res) => {
       .single();
 
     if (data?.image_path) {
-      await supabaseAdmin.storage
-        .from("current-affairs")
-        .remove([data.image_path]);
+      try {
+        if (fs.existsSync(data.image_path)) {
+          await fs.promises.unlink(data.image_path);
+        }
+      } catch (err) {
+        console.error("Failed to delete old image:", err);
+      }
     }
 
     const { error } = await supabaseAdmin
@@ -171,10 +176,15 @@ export const deleteCategory = async (req, res) => {
       .filter(Boolean);
 
     if (paths.length > 0) {
-      await supabaseAdmin
-        .storage
-        .from("current-affairs")
-        .remove(paths);
+      for (const p of paths) {
+        try {
+          if (fs.existsSync(p)) {
+            await fs.promises.unlink(p);
+          }
+        } catch (err) {
+          console.error("Failed to delete category image:", p, err);
+        }
+      }
     }
 
     // 3️⃣ Delete all articles in category

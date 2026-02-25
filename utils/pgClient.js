@@ -32,7 +32,10 @@ class QueryBuilder {
   /* ----- operations ----- */
 
   select(columns, opts) {
-    this._operation = "select";
+    if (!["insert", "update", "delete", "upsert"].includes(this._operation)) {
+      this._operation = "select";
+    }
+    this._returnData = true;
     this._columns = columns || "*";
     if (opts?.count === "exact") this._countMode = "exact";
     if (opts?.head) this._headOnly = true;

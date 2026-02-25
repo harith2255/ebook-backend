@@ -2,6 +2,8 @@
 import dayjs from "dayjs";
 import { v4 as uuidv4 } from "uuid";
 import { supabaseAdmin } from "../utils/supabaseClient.js";
+import fs from "fs";
+import path from "path";
 
 const EXAMS_BUCKET = "exam-files";
 const SUBMISSION_BUCKET = "submission-files";
@@ -27,22 +29,22 @@ export async function uploadExamFile(req, res) {
     const examId = Number(req.params.id);
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
-    const filename = `${uuidv4()}-${req.file.originalname}`;
-    const path = `exams/${filename}`;
+    const filename = `${uuidv4()}-${req.file.originalname.replace(/\s+/g, "_")}`;
+    const uploadDir = path.join(process.cwd(), "uploads", "exams");
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    const absolutePath = path.join(uploadDir, filename);
 
-    const { error: uploadErr } = await supabaseAdmin.storage
-      .from(EXAMS_BUCKET)
-      .upload(path, req.file.buffer, {
-        contentType: req.file.mimetype,
-        upsert: false,
-      });
+    await fs.promises.writeFile(absolutePath, req.file.buffer);
 
-    if (uploadErr) throw uploadErr;
+    const publicUrl = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/exams/${filename}`;
 
     const { data, error } = await supabaseAdmin
       .from("exams")
       .update({
-        file_path: path,
+        file_path: absolutePath, // Keep for deletion later
+        file_url: publicUrl,
         file_name: req.file.originalname,
       })
       .eq("id", examId)
@@ -75,12 +77,13 @@ export async function listExams(req, res) {
         const unlocked = isUnlocked(exam);
 
         let view_url = null;
-        if (unlocked && exam.file_path) {
-          const { data: signed } = await supabaseAdmin.storage
-            .from(EXAMS_BUCKET)
-            .createSignedUrl(exam.file_path, 300);
-
-          view_url = signed?.signedUrl ?? null;
+        if (unlocked && (exam.file_url || exam.file_path)) {
+          if (exam.file_url) {
+             view_url = exam.file_url;
+          } else {
+             const fileName = path.basename(exam.file_path);
+             view_url = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/exams/${fileName}`;
+          }
         }
 
         return {
@@ -114,12 +117,13 @@ export async function getExam(req, res) {
     const unlocked = isUnlocked(exam);
 
     let view_url = null;
-    if (unlocked && exam.file_path) {
-      const { data: signed } = await supabaseAdmin.storage
-        .from(EXAMS_BUCKET)
-        .createSignedUrl(exam.file_path, 300);
-
-      view_url = signed?.signedUrl ?? null;
+    if (unlocked && (exam.file_url || exam.file_path)) {
+      if (exam.file_url) {
+         view_url = exam.file_url;
+      } else {
+         const fileName = path.basename(exam.file_path);
+         view_url = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/exams/${fileName}`;
+      }
     }
 
     return res.json({
@@ -160,21 +164,21 @@ export async function attendExam(req, res) {
     }
 
     let answer_file_path = null;
-    let answer_file_name = null;
+    let answer_file_url = null;
 
     if (req.file) {
-      const filename = `${uuidv4()}-${req.file.originalname}`;
-      const path = `submissions/${filename}`;
+      const filename = `${uuidv4()}-${req.file.originalname.replace(/\s+/g, "_")}`;
+      const uploadDir = path.join(process.cwd(), "uploads", "submissions");
+      
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
 
-      const { error: uploadErr } = await supabaseAdmin.storage
-        .from(SUBMISSION_BUCKET)
-        .upload(path, req.file.buffer, {
-          contentType: req.file.mimetype,
-        });
+      const absolutePath = path.join(uploadDir, filename);
+      await fs.promises.writeFile(absolutePath, req.file.buffer);
 
-      if (uploadErr) throw uploadErr;
-
-      answer_file_path = path;
+      answer_file_path = absolutePath;
+      answer_file_url = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/submissions/${filename}`;
       answer_file_name = req.file.originalname;
     }
 
@@ -232,12 +236,11 @@ export async function getUserSubmissions(req, res) {
       (data || []).map(async (s) => {
         let fileUrl = null;
 
-        if (s.answer_file_path) {
-          const { data: signed } = await supabaseAdmin.storage
-            .from(SUBMISSION_BUCKET)
-            .createSignedUrl(s.answer_file_path, 300);
-
-          fileUrl = signed?.signedUrl ?? null;
+        if (s.answer_file_url) {
+           fileUrl = s.answer_file_url;
+        } else if (s.answer_file_path) {
+           const fileName = path.basename(s.answer_file_path);
+           fileUrl = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/submissions/${fileName}`;
         }
 
         return {
@@ -287,14 +290,10 @@ export async function getFoldersForUser(req, res) {
         (notes || [])
           .filter((n) => n.subject_id === s.id)
           .map(async (n) => {
-            let url = null;
-            try {
-              const { data: signed } = await supabaseAdmin.storage
-                .from(NOTES_BUCKET)
-                .createSignedUrl(n.file_path, 300);
-              url = signed?.signedUrl ?? null;
-            } catch (err) {
-              console.warn("Note URL error:", err.message);
+            let url = n.file_url || null;
+            if (!url && n.file_path) {
+               const fileName = path.basename(n.file_path);
+               url = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/study_notes/${fileName}`;
             }
 
             return {
@@ -320,24 +319,16 @@ export async function getFoldersForUser(req, res) {
 
             let url = null;
 
-            // generate signed url only if file_path exists; but log result for debugging
-            if (e.file_path) {
-              try {
-                // still only expose URL to users when unlocked
-                if (unlocked) {
-                  const { data: signed } = await supabaseAdmin.storage
-                  .from(EXAMS_BUCKET)
-
-                    .createSignedUrl(e.file_path, 300);
-                  url = signed?.signedUrl ?? null;
-                  console.debug(`Exam signed url for exam ${e.id}:`, url);
-                } else {
-                  // keep url null for locked exams (frontend shows countdown or locked UI)
-                  console.debug(`Exam ${e.id} is locked (start=${e.start_time}, end=${e.end_time})`);
-                }
-              } catch (err) {
-                // log — do not throw so the folders response still returns
-                console.warn("Exam URL error (getFoldersForUser):", err.message, "examId=", e.id);
+            // Use DB file_url first, or fallback to parsing the path
+            if (e.file_url) {
+               url = unlocked ? e.file_url : null;
+            } else if (e.file_path) {
+              if (unlocked) {
+                 const fileName = path.basename(e.file_path);
+                 url = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/exams/${fileName}`;
+                 console.debug(`Exam url for exam ${e.id}:`, url);
+              } else {
+                 console.debug(`Exam ${e.id} is locked (start=${e.start_time}, end=${e.end_time})`);
               }
             }
 

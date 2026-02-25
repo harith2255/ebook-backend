@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import { supabaseAdmin } from "../../utils/supabaseClient.js";
 
 /* ---------------- HELPERS ---------------- */
@@ -36,24 +38,20 @@ export const uploadPYQ = async (req, res) => {
       subject = insert.data;
     }
 
-    const basePath = `${slugify(subjectName)}/${year}`;
+    const basePath = path.join("uploads", "pyq", slugify(subjectName), year);
+    if (!fs.existsSync(basePath)) {
+      fs.mkdirSync(basePath, { recursive: true });
+    }
 
     /* ---------- FILE UPLOAD ---------- */
     const uploadFile = async (file, type) => {
-      const path = `${basePath}/${type}.pdf`;
+      // Create a URL-safe relative path
+      const relPath = `${slugify(subjectName)}/${year}/${type}.pdf`;
+      const absolutePath = path.join(basePath, `${type}.pdf`);
 
-      const { error: uploadError } = await supabaseAdmin.storage
-        .from("pyq")
-        .upload(path, file.buffer, {
-          contentType: "application/pdf",
-          upsert: true,
-        });
+      await fs.promises.writeFile(absolutePath, file.buffer);
 
-      if (uploadError) throw uploadError;
-
-      const { data: urlData } = supabaseAdmin.storage
-        .from("pyq")
-        .getPublicUrl(path);
+      const publicUrl = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/pyq/${relPath}`;
 
       const { error: insertError } = await supabaseAdmin
         .from("pyq_papers")
@@ -64,8 +62,8 @@ export const uploadPYQ = async (req, res) => {
           title: `${year} ${
             type === "question" ? "Question Paper" : "Answer Key"
           }`,
-          file_url: urlData.publicUrl,
-          file_path: path,
+          file_url: publicUrl,
+          file_path: absolutePath, // using local fs path now
           file_size: Number((file.size / 1024 / 1024).toFixed(2)),
         });
 

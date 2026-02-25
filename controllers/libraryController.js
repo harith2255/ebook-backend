@@ -758,15 +758,17 @@ export const saveLastPage = async (req, res) => {
     const { bookId } = req.params;
     const { last_page } = req.body;
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("user_library")
-      .update({ last_page })
+      .update({ last_page: Number(last_page) })
       .eq("user_id", userId)
-      .eq("book_id", bookId);
+      .eq("book_id", bookId)
+      .select()
+      .maybeSingle();
 
     if (error) return res.status(400).json({ error: error.message });
 
-    res.json({ message: "Last page saved", last_page });
+    res.json({ message: "Last page saved", last_page: data?.last_page || last_page });
   } catch (err) {
     console.error("saveLastPage error:", err);
     res.status(500).json({ error: "Failed to save last page" });

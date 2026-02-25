@@ -1,6 +1,7 @@
 // src/controllers/admin/adminExamController.js
- import { supabaseAdmin as supabase } from "../../utils/supabaseClient.js";
-
+import { supabaseAdmin as supabase } from "../../utils/supabaseClient.js";
+import fs from "fs";
+import path from "path";
 import { v4 as uuid } from "uuid";
 import dayjs from "dayjs";
 
@@ -81,18 +82,21 @@ export async function uploadNote(req, res) {
     if (!subject)
       return res.status(400).json({ error: "Invalid subject" });
 
-    const filename = `${uuid()}-${req.file.originalname}`;
-    const path = `study_notes/${filename}`;
+    const filename = `${uuid()}-${req.file.originalname.replace(/\s+/g, "_")}`;
+    const uploadDir = path.join(process.cwd(), "uploads", "study_notes");
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    const absolutePath = path.join(uploadDir, filename);
 
-    await supabase.storage
-      .from("notes-files")
-      .upload(path, req.file.buffer, {
-        contentType: req.file.mimetype,
-      });
-const { data: roleCheck } = await supabase.rpc("current_setting", {
-  setting_name: "role"
-});
-console.log("DB ROLE:", roleCheck);
+    await fs.promises.writeFile(absolutePath, req.file.buffer);
+
+    const publicUrl = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/study_notes/${filename}`;
+
+    const { data: roleCheck } = await supabase.rpc("current_setting", {
+      setting_name: "role"
+    });
+    console.log("DB ROLE:", roleCheck);
 
     const { data, error } = await supabase
       .from("study_notes")
@@ -100,7 +104,8 @@ console.log("DB ROLE:", roleCheck);
         subject_id,
         title: req.file.originalname,
         file_name: req.file.originalname,
-        file_path: path,
+        file_path: absolutePath, // keeping absolute path for local deletion later
+        file_url: publicUrl, // adding a URL for the frontend
         uploaded_by: req.user?.id ?? null,
         created_by: req.user?.id ?? null,
       })
@@ -168,22 +173,22 @@ export async function uploadExamFile(req, res) {
 
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
-    const filename = `${uuid()}-${req.file.originalname}`;
-    const path = `exams/${filename}`;
+    const filename = `${uuid()}-${req.file.originalname.replace(/\s+/g, "_")}`;
+    const uploadDir = path.join(process.cwd(), "uploads", "exams");
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    const absolutePath = path.join(uploadDir, filename);
 
-    const { error: uploadErr } = await supabase.storage
-      .from(EXAMS_BUCKET)
-      .upload(path, req.file.buffer, {
-        contentType: req.file.mimetype,
-        upsert: false,
-      });
+    await fs.promises.writeFile(absolutePath, req.file.buffer);
 
-    if (uploadErr) throw uploadErr;
+    const publicUrl = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/exams/${filename}`;
 
     const { data, error } = await supabase
       .from("exams")
       .update({
-        file_path: path,
+        file_path: absolutePath, // keeping absolute path for deletion
+        file_url: publicUrl, // adding a URL field
         file_name: req.file.originalname,
       })
       .eq("id", examId)
@@ -202,8 +207,6 @@ export async function uploadExamFile(req, res) {
 /* -------------------------------------------------------------------------- */
 /*                             GET ALL EXAMS (SAFE)                            */
 /* -------------------------------------------------------------------------- */
-// src/controllers/examController.js (listExams)
-// GET ALL EXAMS (SAFE) - patched
 export async function listExams(req, res) {
   try {
     const { data: exams, error } = await supabase
@@ -222,25 +225,21 @@ export async function listExams(req, res) {
           (!exam.end_time || dayjs(exam.end_time).isAfter(now));
 
         let view_url = null;
-        if (unlocked && exam.file_path) {
-          try {
-            const { data: signed } = await supabase.storage
-              .from(EXAMS_BUCKET) // <-- use correct constant
-              .createSignedUrl(exam.file_path, 300);
-
-            // defensive: supabase might return signedUrl or signed_url
-            view_url = signed?.signedUrl ?? signed?.signed_url ?? null;
-            console.debug("listExams signed url:", exam.id, view_url);
-          } catch (err) {
-            console.warn("listExams createSignedUrl error:", err?.message || err, "examId=", exam.id);
-            view_url = null;
+        if (unlocked && (exam.file_url || exam.file_path)) {
+          // If the DB has `file_url`, return it directly instead of creating a signed URL
+          if (exam.file_url) {
+             view_url = exam.file_url;
+          } else {
+             // Fallback for locally stored but missing direct field
+             const fileName = path.basename(exam.file_path);
+             view_url = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/exams/${fileName}`;
           }
         }
 
         return {
           ...exam,
           unlocked,
-          view_url, // null for locked or failed signed URLs
+          view_url, // URL to the pdf
         };
       })
     );
@@ -271,26 +270,28 @@ export async function attendExam(req, res) {
     if (!exam) return res.status(404).json({ error: "Exam not found" });
 
     const now = dayjs();
-  const unlocked =
-  (!exam.start_time || dayjs(exam.start_time).isBefore(now)) &&
-  (!exam.end_time   || dayjs(exam.end_time).isAfter(now));
-
+    const unlocked =
+      (!exam.start_time || dayjs(exam.start_time).isBefore(now)) &&
+      (!exam.end_time   || dayjs(exam.end_time).isAfter(now));
 
     if (!unlocked) return res.status(403).json({ error: "Exam is locked" });
 
     let answer_file_path = null;
+    let answer_file_url = null;
 
     if (req.file) {
-      const filename = `${uuid()}-${req.file.originalname}`;
-      const path = `submissions/${filename}`;
+      const filename = `${uuid()}-${req.file.originalname.replace(/\s+/g, "_")}`;
+      const uploadDir = path.join(process.cwd(), "uploads", "submissions");
+      
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
 
-      await supabase.storage
-        .from(SUBMISSION_BUCKET)
-        .upload(path, req.file.buffer, {
-          contentType: req.file.mimetype,
-        });
+      const absolutePath = path.join(uploadDir, filename);
+      await fs.promises.writeFile(absolutePath, req.file.buffer);
 
-      answer_file_path = path;
+      answer_file_path = absolutePath;
+      answer_file_url = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/submissions/${filename}`;
     }
 
     const { data, error } = await supabase
@@ -301,6 +302,7 @@ export async function attendExam(req, res) {
           user_id: req.user.id,
           answer_text: req.body.answer_text || null,
           answer_file_path,
+          answer_file_url, // custom field
         },
       ])
       .select()
@@ -343,13 +345,13 @@ export async function getExamSubmissions(req, res) {
 
         const email = profileData?.email ?? null;
 
-        // signed URL if file exists
+        // static URL if file exists
         let url = null;
-        if (s.answer_file_path) {
-          const { data: signed } = await supabase.storage
-            .from("submission-files")
-            .createSignedUrl(s.answer_file_path, 300);
-          url = signed?.signedUrl ?? null;
+        if (s.answer_file_url) {
+           url = s.answer_file_url;
+        } else if (s.answer_file_path) {
+           const fileName = path.basename(s.answer_file_path);
+           url = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/submissions/${fileName}`;
         }
 
         return {
@@ -415,14 +417,16 @@ export async function getFolders(req, res) {
     for (const s of subjects || []) {
       const subjectNotes = await Promise.all(
         (notesBySubject[s.id] || []).map(async (n) => {
-          const { data } = await supabase.storage
-            .from("notes-files")
-            .createSignedUrl(n.file_path, 300);
+          let url = n.file_url || null;
+          if (!url && n.file_path) {
+            const fileName = path.basename(n.file_path);
+            url = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/study_notes/${fileName}`;
+          }
 
           return {
             id: n.id,
             name: n.file_name,
-            url: data?.signedUrl ?? null,
+            url,
             createdAt: n.created_at,
           };
         })
@@ -435,11 +439,11 @@ export async function getFolders(req, res) {
             (!e.end_time || dayjs(e.end_time).isAfter(now));
 
           let url = null;
-          if (e.file_path) {
-            const { data } = await supabase.storage
-              .from("exam-files")
-              .createSignedUrl(e.file_path, 300);
-            url = data?.signedUrl ?? null;
+          if (e.file_url) {
+            url = e.file_url;
+          } else if (e.file_path) {
+            const fileName = path.basename(e.file_path);
+            url = `${process.env.BACKEND_URL || "http://localhost:5000"}/uploads/exams/${fileName}`;
           }
 
           const st = stats[e.id] || { total: 0, graded: 0 };
@@ -507,9 +511,11 @@ export async function deleteSubject(req, res) {
       .eq("subject_id", subjectId);
 
     if (notes?.length) {
-      await supabase.storage
-        .from(NOTES_BUCKET)
-        .remove(notes.map((n) => n.file_path));
+      for (const n of notes) {
+        if (n.file_path && fs.existsSync(n.file_path)) {
+          try { await fs.promises.unlink(n.file_path); } catch (e) { console.error("Could not delete note file:", e); }
+        }
+      }
     }
 
     await supabase.from("study_notes").delete().eq("subject_id", subjectId);
@@ -520,9 +526,11 @@ export async function deleteSubject(req, res) {
       .eq("subject_id", subjectId);
 
     if (exams?.length) {
-      const examPaths = exams.filter((e) => e.file_path).map((e) => e.file_path);
-      if (examPaths.length)
-        await supabase.storage.from(EXAMS_BUCKET).remove(examPaths);
+      for (const e of exams) {
+        if (e.file_path && fs.existsSync(e.file_path)) {
+          try { await fs.promises.unlink(e.file_path); } catch (e) { console.error("Could not delete exam file:", e); }
+        }
+      }
     }
 
     const examIds = exams?.map((e) => e.id) || [];
@@ -533,13 +541,11 @@ export async function deleteSubject(req, res) {
       .in("exam_id", examIds);
 
     if (submissions?.length) {
-      const submissionPaths = submissions
-        .filter((s) => s.answer_file_path)
-        .map((s) => s.answer_file_path);
-      if (submissionPaths.length)
-        await supabase.storage
-          .from(SUBMISSION_BUCKET)
-          .remove(submissionPaths);
+      for (const s of submissions) {
+         if (s.answer_file_path && fs.existsSync(s.answer_file_path)) {
+            try { await fs.promises.unlink(s.answer_file_path); } catch (e) { console.error("Could not delete submission file:", e); }
+         }
+      }
     }
 
     await supabase.from("submissions").delete().in("exam_id", examIds);
