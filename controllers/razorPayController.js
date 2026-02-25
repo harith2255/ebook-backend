@@ -3,10 +3,19 @@ import Razorpay from "razorpay";
 import supabase from "../utils/supabaseClient.js";
 import { unifiedPurchase } from "./purchaseController.js";
 
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET,
-});
+let razorpay;
+try {
+  if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
+    razorpay = new Razorpay({
+      key_id: process.env.RAZORPAY_KEY_ID,
+      key_secret: process.env.RAZORPAY_KEY_SECRET,
+    });
+  } else {
+    console.warn("⚠️ RAZORPAY_KEY_ID or RAZORPAY_KEY_SECRET is missing. Payments won't work.");
+  }
+} catch (err) {
+  console.error("⚠️ Failed to initialize Razorpay:", err.message);
+}
 
 /* =====================================================
    CREATE RAZORPAY ORDER
@@ -26,6 +35,11 @@ export const createRazorpayOrder = async (req, res) => {
     if (!amount || amount <= 0) {
       console.warn("❌ Invalid amount:", amount);
       return res.status(400).json({ error: "Invalid amount" });
+    }
+
+    if (!razorpay) {
+      console.error("❌ Razorpay not properly initialized. Check environment variables.");
+      return res.status(500).json({ error: "Payment gateway is currently unavailable" });
     }
 
     const order = await razorpay.orders.create({
