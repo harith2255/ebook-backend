@@ -393,7 +393,8 @@ class QueryBuilder {
         "ebooks": "book_id",
         "subscription_plans": "plan_id",
         "categories": "category_id",
-        "mock_tests": "test_id"
+        "mock_tests": "test_id",
+        "payments_transactions": "payment_id"
       };
       
       let fkCol = fkMap[fk.joinTable] || baseCol;
