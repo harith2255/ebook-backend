@@ -1,4 +1,4 @@
-import supabase from "../utils/supabaseClient.js";
+import supabase from "../utils/pgClient.js";
 import axios from "axios";
 import { PDFDocument } from "pdf-lib"; // needed for preview PDF generation
 

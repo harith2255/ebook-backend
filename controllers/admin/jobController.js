@@ -1,4 +1,4 @@
-import supabase from "../../utils/supabaseClient.js";
+import supabase from "../../utils/pgClient.js";
 
 /* -------------------------------------------------
  ✅ Get all jobs with requirements

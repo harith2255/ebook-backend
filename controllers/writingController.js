@@ -1,5 +1,5 @@
 // controllers/writingServiceController.js
-import supabase from "../utils/supabaseClient.js";
+import supabase from "../utils/pgClient.js";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
@@ -412,7 +412,7 @@ export const getInterviewMaterialById = async (req, res) => {
    STREAM INTERVIEW MATERIAL PDF (FOR PDFJS)
 ===================================================== */
 // controllers/writingController.js
-import { supabaseAdmin } from "../utils/supabaseClient.js";
+import { supabaseAdmin } from "../utils/pgClient.js";
 
 // controllers/writingController.js
 

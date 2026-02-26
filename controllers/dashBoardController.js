@@ -1,5 +1,5 @@
 // controllers/dashboardController.js
-import supabase from "../utils/supabaseClient.js";
+import supabase from "../utils/pgClient.js";
 
 // Ignore sessions shorter than ~1 minute
 const MIN_SESSION_HOURS = 1 / 60; // 0.0167 hours

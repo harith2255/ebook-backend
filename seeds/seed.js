@@ -1,4 +1,4 @@
-import supabase from "../utils/supabaseClient.js";
+import supabase from "../utils/pgClient.js";
 import dotenv from "dotenv";
 import crypto from "crypto";
 import bcrypt from "bcrypt";

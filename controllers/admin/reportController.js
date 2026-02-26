@@ -1,5 +1,5 @@
 // controllers/admin/reportsController.js
-import { supabaseAdmin } from "../../utils/supabaseClient.js";
+import { supabaseAdmin } from "../../utils/pgClient.js";
 import fs from "fs";
 import path from "path";
 

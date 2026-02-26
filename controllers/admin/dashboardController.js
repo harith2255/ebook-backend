@@ -1,4 +1,4 @@
-import { supabaseAdmin } from "../../utils/supabaseClient.js";
+import { supabaseAdmin } from "../../utils/pgClient.js";
 
 // Format month name from date
 const formatMonth = (d) =>

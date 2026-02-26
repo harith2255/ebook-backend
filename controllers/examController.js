@@ -1,7 +1,7 @@
 // src/controllers/examController.js
 import dayjs from "dayjs";
 import { v4 as uuidv4 } from "uuid";
-import { supabaseAdmin } from "../utils/supabaseClient.js";
+import { supabaseAdmin } from "../utils/pgClient.js";
 import fs from "fs";
 import path from "path";
 

@@ -1,4 +1,4 @@
-import supabase from "../utils/supabaseClient.js";
+import supabase from "../utils/pgClient.js";
 import { validate as isUUID } from "uuid";
 
 /* ============================================================

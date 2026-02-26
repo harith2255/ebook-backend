@@ -1,4 +1,4 @@
-import { supabaseAdmin } from "../../utils/supabaseClient.js";
+import { supabaseAdmin } from "../../utils/pgClient.js";
 import { randomUUID } from "crypto";
 import fs from "fs";
 import path from "path";

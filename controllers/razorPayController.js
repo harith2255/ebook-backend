@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import Razorpay from "razorpay";
-import supabase from "../utils/supabaseClient.js";
+import supabase from "../utils/pgClient.js";
 import { unifiedPurchase } from "./purchaseController.js";
 
 let razorpay;

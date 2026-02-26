@@ -1,5 +1,5 @@
 import express from "express";
-import supabase from "../../utils/supabaseClient.js";
+import supabase from "../../utils/pgClient.js";
 import bcrypt from "bcrypt";
 
 const router = express.Router();

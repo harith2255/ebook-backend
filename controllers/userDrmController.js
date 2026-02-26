@@ -1,4 +1,4 @@
-import supabase from "../utils/supabaseClient.js";
+import supabase from "../utils/pgClient.js";
 export function getDeviceId() {
   let deviceId = localStorage.getItem("device_id");
 

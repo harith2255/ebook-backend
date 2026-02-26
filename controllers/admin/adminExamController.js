@@ -1,5 +1,5 @@
 // src/controllers/admin/adminExamController.js
-import { supabaseAdmin as supabase } from "../../utils/supabaseClient.js";
+import { supabaseAdmin as supabase } from "../../utils/pgClient.js";
 import fs from "fs";
 import path from "path";
 import { v4 as uuid } from "uuid";

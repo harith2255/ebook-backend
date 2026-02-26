@@ -1,5 +1,5 @@
 // controllers/admin/notificationController.js
-import { supabaseAdmin } from "../../utils/supabaseClient.js";
+import { supabaseAdmin } from "../../utils/pgClient.js";
 
 /* -------------------------------------------------------
    1️⃣ FETCH ALL USERS (with pagination)

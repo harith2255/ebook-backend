@@ -1,5 +1,5 @@
 import openai from "./openaiClient.js";
-import supabase from "../utils/supabaseClient.js";
+import supabase from "../utils/pgClient.js";
 
 const CHAT_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const EMB_MODEL  = process.env.EMBEDDING_MODEL || "text-embedding-3-small";

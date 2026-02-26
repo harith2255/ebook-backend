@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { supabaseAdmin } from "../../utils/supabaseClient.js";
+import { supabaseAdmin } from "../../utils/pgClient.js";
 
 /* ---------------- HELPERS ---------------- */
 const slugify = (text = "") =>

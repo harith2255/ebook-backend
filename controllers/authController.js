@@ -1,6 +1,6 @@
 import pool from "../utils/db.js";
-import supabase from "../utils/supabaseClient.js";
-import { supabaseAdmin } from "../utils/supabaseClient.js";
+import supabase from "../utils/pgClient.js";
+import { supabaseAdmin } from "../utils/pgClient.js";
 
 import { logActivity } from "../utils/activityLogger.js";
 import crypto from "crypto";

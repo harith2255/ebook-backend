@@ -1,4 +1,4 @@
-import supabase from "../../utils/supabaseClient.js";
+import supabase from "../../utils/pgClient.js";
 import fs from "fs";
 import path from "path";
 

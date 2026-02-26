@@ -3,7 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import bodyParser from "body-parser";
 import cron from "node-cron";
-import supabase from "./utils/supabaseClient.js";
+import supabase from "./utils/pgClient.js";
 import pool from "./utils/db.js";
 
 import compression from "compression";

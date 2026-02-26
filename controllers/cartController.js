@@ -1,5 +1,5 @@
 // controllers/cartController.js
-import supabase from "../utils/supabaseClient.js";
+import supabase from "../utils/pgClient.js";
 
 /* ------------------------------------------------------------
    GET /api/cart

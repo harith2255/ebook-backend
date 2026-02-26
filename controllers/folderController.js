@@ -1,5 +1,5 @@
 // src/controllers/folderController.js
-import { supabaseAdmin } from "../utils/supabaseClient.js";
+import { supabaseAdmin } from "../utils/pgClient.js";
 
 export async function listFolders(req, res) {
   try {

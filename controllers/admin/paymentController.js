@@ -1,5 +1,5 @@
 // controllers/admin/paymentsController.js
-import { supabaseAdmin } from "../../utils/supabaseClient.js";
+import { supabaseAdmin } from "../../utils/pgClient.js";
 
 /* -------------------------------------------------------
    HELPERS

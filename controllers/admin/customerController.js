@@ -2,7 +2,7 @@
 import {
   supabaseAdmin,
   supabasePublic
-} from "../../utils/supabaseClient.js";
+} from "../../utils/pgClient.js";
 
 import nodemailer from "nodemailer";
 

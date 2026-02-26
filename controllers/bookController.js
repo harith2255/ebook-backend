@@ -1,5 +1,5 @@
 // controllers/bookController.js
-import supabase from "../utils/supabaseClient.js";
+import supabase from "../utils/pgClient.js";
 
 /* ============================
    GET ALL BOOKS
@@ -223,7 +223,7 @@ export const logBookRead = async (req, res) => {
     res.status(500).json({ error: "Could not log read action" });
   }
 };
-import { supabaseAdmin } from "../utils/supabaseClient.js";
+import { supabaseAdmin } from "../utils/pgClient.js";
 
 /* ======================================================
    RATE EBOOK

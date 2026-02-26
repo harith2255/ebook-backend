@@ -1,4 +1,4 @@
-import supabase from "./supabaseClient.js";
+import supabase from "./pgClient.js";
 
 export async function logActivity(userId, userName, action, type = "activity") {
   try {
