@@ -20,7 +20,8 @@ const allowedOrigins = new Set([
   "http://localhost:3001",
   "http://localhost:4173",
   "https://e-book-gray-one.vercel.app",
-  "https://e-book-production-6f13.up.railway.app"
+  "https://e-book-production-6f13.up.railway.app",
+  "https://www.farminkforum.com ",
 ]);
 
 app.use(
